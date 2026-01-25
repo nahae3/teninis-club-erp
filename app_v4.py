@@ -287,6 +287,23 @@ is_admin = check_admin()
 
 menu = st.sidebar.radio("메뉴", ["📺 실시간 현황판", "👥 회원 관리", "🏟️ 경기 운영", "📊 Elo 랭킹 & 분석", "📝 경기 기록 관리"])
 
+# --- [NEW] 관리자용 데이터 백업 버튼 (사이드바) ---
+if is_admin:
+    st.sidebar.divider()
+    st.sidebar.markdown("💾 **데이터 백업**")
+    
+    # 경기 기록 다운로드
+    hist_df = load_data("경기기록", ["날짜", "경기ID", "팀1", "팀2", "점수1", "점수2", "승리팀"])
+    csv = hist_df.to_csv(index=False).encode('utf-8-sig') # 한글 깨짐 방지
+    
+    st.sidebar.download_button(
+        label="📥 경기기록 다운로드 (CSV)",
+        data=csv,
+        file_name=f"경기기록_{datetime.now().strftime('%Y%m%d')}.csv",
+        mime="text/csv",
+    )
+
+
 # [0] 실시간 현황판 (누구나 접속 가능 + 관리자용 초기화 버튼)
 if menu == "📺 실시간 현황판":
     st.header("📺 LIVE SCOREBOARD")
@@ -336,25 +353,63 @@ if menu == "📺 실시간 현황판":
         st.caption("운영자가 대진표를 공유하면 여기에 표시됩니다.")
 
 
-# [1] 회원 관리
+# [1] 회원 관리 (수정버전: 삭제 기능 추가)
 elif menu == "👥 회원 관리":
     st.header("👥 회원 관리")
-    col1, col2 = st.columns([2, 1])
+    
+    # 데이터 로드
     member_df = load_data("회원정보", ["이름", "가입일", "메모"])
-    with col1: st.dataframe(member_df, width="stretch", hide_index=True)
-    with col2:
+    
+    tab1, tab2 = st.tabs(["📜 회원 목록", "⚙️ 관리 (등록/삭제)"])
+    
+    with tab1:
+        st.dataframe(member_df, width="stretch", hide_index=True)
+        st.caption(f"총 회원수: {len(member_df)}명")
+        
+    with tab2:
         if is_admin:
-            with st.form("add"):
-                name = st.text_input("이름")
-                memo = st.text_input("메모")
-                if st.form_submit_button("등록"):
-                    if name and name not in member_df["이름"].values:
-                        add_member_to_db(name, memo)
-                        st.success("등록 완료!")
-                        st.rerun()
-                    else: st.error("이름 확인 필요")
+            c1, c2 = st.columns(2)
+            
+            # [등록]
+            with c1:
+                st.subheader("➕ 신규 회원 등록")
+                with st.form("add_member_form"):
+                    name = st.text_input("이름")
+                    memo = st.text_input("메모 (선택)")
+                    if st.form_submit_button("등록"):
+                        if name and name not in member_df["이름"].values:
+                            add_member_to_db(name, memo)
+                            st.success(f"'{name}' 회원 등록 완료!")
+                            st.rerun()
+                        elif name in member_df["이름"].values:
+                            st.error("이미 등록된 이름입니다.")
+                        else:
+                            st.error("이름을 입력하세요.")
+                            
+            # [삭제] - 새로 추가된 기능
+            with c2:
+                st.subheader("🗑️ 회원 삭제")
+                if not member_df.empty:
+                    to_delete = st.selectbox("삭제할 회원 선택", member_df["이름"].tolist())
+                    
+                    st.warning("⚠️ 삭제하면 복구할 수 없습니다.")
+                    if st.button("선택한 회원 영구 삭제", type="primary"):
+                        try:
+                            ws = spreadsheet.worksheet("회원정보")
+                            # 이름이 있는 셀 찾기
+                            cell = ws.find(to_delete)
+                            ws.delete_rows(cell.row)
+                            st.cache_data.clear()
+                            st.success(f"'{to_delete}' 님을 명단에서 삭제했습니다.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"삭제 중 오류 발생: {e}")
+                else:
+                    st.info("삭제할 회원이 없습니다.")
         else:
-            st.info("🔒 회원 등록은 관리자만 가능합니다.")
+            st.info("🔒 회원 등록 및 삭제는 관리자 권한이 필요합니다.")
+            st.caption("사이드바에서 관리자 암호를 입력하세요.")
+
 
 # [2] 경기 운영
 elif menu == "🏟️ 경기 운영":
@@ -647,56 +702,140 @@ elif menu == "📊 Elo 랭킹 & 분석":
                     "승률": f"{win_rate:.1f}%"
                 })
         
-        # 랭킹 출력
+        # 랭킹 출력 (1등부터)
         rank_df = pd.DataFrame(rank_data).sort_values("포인트", ascending=False)
         rank_df = rank_df.reset_index(drop=True)
-        rank_df.index = rank_df.index + 1 # 1등부터 표시
+        rank_df.index = rank_df.index + 1 
         st.dataframe(rank_df, use_container_width=True)
         
         st.divider()
         
-        # 4. [부활] 개인별 상세 분석
-        st.subheader("🔍 개인별 상세 분석")
+        # 4. [개인별 상세 분석] (4대 천왕 분석 포함)
+        st.subheader("🔍 개인별 상세 전력 분석")
         
-        # 선수 선택 박스 (랭킹에 있는 사람만)
+        # 선수 선택
         player_list = rank_df['이름'].tolist()
         if player_list:
-            selected_player = st.selectbox("선수를 선택하세요", player_list)
+            selected_player = st.selectbox("분석할 선수를 선택하세요", player_list)
             
             if selected_player:
                 p_stat = stats.get(selected_player)
                 
-                # (1) 핵심 지표 카드
+                # (1) 기본 스탯 카드
                 c1, c2, c3, c4 = st.columns(4)
-                c1.metric("🏅 현재 점수", f"{p_stat['point']}점")
-                c2.metric("전체 경기", f"{p_stat['경기']}전")
+                c1.metric("🏅 랭킹 포인트", f"{p_stat['point']}점")
+                c2.metric("총 경기수", f"{p_stat['경기']}전")
                 win_rate_val = (p_stat['승'] / p_stat['경기'] * 100) if p_stat['경기'] > 0 else 0
                 c3.metric("승률", f"{win_rate_val:.1f}%")
-                c4.metric("전적", f"{p_stat['승']}승 {p_stat['무']}무 {p_stat['패']}패")
+                c4.metric("종합 전적", f"{p_stat['승']}승 {p_stat['무']}무 {p_stat['패']}패")
                 
-                # (2) 최근 경기 기록 필터링
-                st.markdown("##### 📜 최근 경기 기록 (최근 10게임)")
+                st.divider()
+
+                # (2) 🕵️‍♂️ 4대 관계 분석 (짝꿍/X맨/먹잇감/천적)
                 
-                # 내가 포함된 경기만 찾기
-                mask = df['팀1'].apply(lambda x: selected_player in str(x).split(',')) | \
-                       df['팀1'].apply(lambda x: selected_player in str(x)) | \
-                       df['팀2'].apply(lambda x: selected_player in str(x).split(',')) | \
+                # 데이터 가공을 위한 초기화
+                teammate_stats = {} # {이름: {'승':0, '경기':0}}
+                opponent_stats = {} # {이름: {'승':0, '경기':0}}
+                
+                # 내가 낀 경기만 필터링
+                mask = df['팀1'].apply(lambda x: selected_player in str(x)) | \
                        df['팀2'].apply(lambda x: selected_player in str(x))
-                       
-                my_matches = df[mask].sort_values("날짜", ascending=False).head(10)
-                
-                if not my_matches.empty:
-                    display_history = []
-                    for _, row in my_matches.iterrows():
-                        # 결과 판정
-                        result_icon = "❓"
-                        if row['승리팀'] == "무승부":
-                            result_icon = "🤝 무"
-                        elif selected_player in str(row['승리팀']):
-                            result_icon = "✅ 승"
-                        else:
-                            result_icon = "❌ 패"
+                my_matches = df[mask].copy()
+
+                for _, row in my_matches.iterrows():
+                    # 팀원 분리 (콤마 제거 및 공백 제거)
+                    t1_list = [x.strip() for x in str(row['팀1']).replace(',', ' ').split()]
+                    t2_list = [x.strip() for x in str(row['팀2']).replace(',', ' ').split()]
+                    
+                    my_team = []
+                    opp_team = []
+                    win = False
+                    
+                    # 내가 어느 팀인지 확인 및 승패 판정
+                    if selected_player in t1_list:
+                        my_team = t1_list
+                        opp_team = t2_list
+                        if row['승리팀'] == row['팀1']: win = True
+                    elif selected_player in t2_list:
+                        my_team = t2_list
+                        opp_team = t1_list
+                        if row['승리팀'] == row['팀2']: win = True
+                    
+                    # 1. 팀원 통계 (나 제외)
+                    for member in my_team:
+                        if member != selected_player:
+                            if member not in teammate_stats: teammate_stats[member] = {'승': 0, '경기': 0}
+                            teammate_stats[member]['경기'] += 1
+                            if win: teammate_stats[member]['승'] += 1
                             
+                    # 2. 상대편 통계
+                    for member in opp_team:
+                        if member != selected_player: # 혹시 모를 에러 방지
+                            if member not in opponent_stats: opponent_stats[member] = {'승': 0, '경기': 0}
+                            opponent_stats[member]['경기'] += 1
+                            if win: opponent_stats[member]['승'] += 1
+
+                # 분석 함수 (승률 높은순 정렬)
+                def get_sorted_stat(stat_dict):
+                    res = []
+                    for k, v in stat_dict.items():
+                        rate = (v['승'] / v['경기']) * 100
+                        res.append((k, rate, v['승'], v['경기'])) # (이름, 승률, 승수, 판수)
+                    return sorted(res, key=lambda x: (x[1], x[3]), reverse=True)
+
+                sorted_team = get_sorted_stat(teammate_stats)
+                sorted_opp = get_sorted_stat(opponent_stats)
+
+                # UI 표시
+                st.markdown("##### 🧬 관계 분석 (케미 & 상성)")
+                
+                col_team, col_opp = st.columns(2)
+                
+                # [왼쪽] 팀원 분석 (우리팀일 때)
+                with col_team:
+                    st.caption("🛡️ 팀원일 때 (Team Chemistry)")
+                    if sorted_team:
+                        # Best: 승률 1등
+                        best_mate = sorted_team[0] 
+                        st.success(f"💙 **환상의 짝꿍**: {best_mate[0]}")
+                        st.markdown(f"└ 승률 **{best_mate[1]:.1f}%** ({best_mate[3]}전 {best_mate[2]}승)")
+                        
+                        # Worst: 승률 꼴등 (맨 마지막)
+                        worst_mate = sorted_team[-1]
+                        st.error(f"💔 **억제기 (X맨)**: {worst_mate[0]}")
+                        st.markdown(f"└ 승률 **{worst_mate[1]:.1f}%** ({worst_mate[3]}전 {worst_mate[2]}승)")
+                    else:
+                        st.info("팀 기록이 부족합니다.")
+
+                # [오른쪽] 상대 분석 (적일 때)
+                with col_opp:
+                    st.caption("⚔️ 적일 때 (Versus Record)")
+                    if sorted_opp:
+                        # Best: 내가 가장 많이 이긴 상대 (승률 높음)
+                        easy_target = sorted_opp[0]
+                        st.success(f"🍖 **맛있는 먹잇감**: {easy_target[0]}")
+                        st.markdown(f"└ 승률 **{easy_target[1]:.1f}%** ({easy_target[3]}전 {easy_target[2]}승)")
+                        
+                        # Worst: 내가 가장 많이 진 상대 (승률 낮음 -> 리스트 끝)
+                        nemesis = sorted_opp[-1]
+                        st.error(f"👿 **천적 (담당일진)**: {nemesis[0]}")
+                        st.markdown(f"└ 승률 **{nemesis[1]:.1f}%** ({nemesis[3]}전 {nemesis[2]}승)")
+                    else:
+                        st.info("상대 기록이 부족합니다.")
+
+                st.divider()
+
+                # (3) 최근 경기 로그
+                st.markdown("##### 📜 최근 경기 로그 (Last 10 Matches)")
+                recent_matches = my_matches.sort_values("날짜", ascending=False).head(10)
+                if not recent_matches.empty:
+                    display_history = []
+                    for _, row in recent_matches.iterrows():
+                        result_icon = "❓"
+                        if row['승리팀'] == "무승부": result_icon = "🤝 무"
+                        elif selected_player in str(row['승리팀']): result_icon = "✅ 승"
+                        else: result_icon = "❌ 패"
+                        
                         display_history.append({
                             "날짜": row['날짜'],
                             "결과": result_icon,
@@ -708,6 +847,42 @@ elif menu == "📊 Elo 랭킹 & 분석":
                     st.info("경기 기록이 없습니다.")
         else:
             st.info("아직 랭킹에 등록된 선수가 없습니다.")
-            
     else:
-        st.info("아직 경기 데이터가 없습니다. 경기를 진행해주세요!")
+        st.info("데이터를 쌓아주세요! 아직 경기가 없습니다.")
+
+# [4] 경기 기록 관리
+elif menu == "📝 경기 기록 관리":
+    st.header("📝 경기 기록 관리 (구글 시트 연동됨)")
+    df = load_data("경기기록", ["날짜", "경기ID", "팀1", "팀2", "점수1", "점수2", "승리팀"])
+    
+    if df.empty:
+        st.info("저장된 경기 기록이 없습니다.")
+    else:
+        df['날짜_short'] = df['날짜'].astype(str).apply(lambda x: x.split(' ')[0] if len(str(x)) > 5 else x)
+        dates = sorted(df['날짜_short'].unique(), reverse=True)
+        selected_date = st.selectbox("📅 날짜 선택", dates)
+        filtered_df = df[df['날짜_short'] == selected_date].copy()
+        
+        if not filtered_df.empty:
+            st.write(f"총 {len(filtered_df)}개의 경기가 있습니다.")
+            filtered_df['삭제'] = False
+            edited_df = st.data_editor(
+                filtered_df[['삭제', '날짜', '팀1', '팀2', '점수1', '점수2', '승리팀', '경기ID']],
+                column_config={
+                    "삭제": st.column_config.CheckboxColumn("선택", help="삭제할 경기를 선택하세요"),
+                    "경기ID": None
+                },
+                hide_index=True,
+                width="stretch"
+            )
+            if st.button("🗑️ 선택한 경기 삭제"):
+                to_delete = edited_df[edited_df['삭제']]['경기ID'].tolist()
+                if to_delete:
+                    with st.spinner("구글 시트에서 삭제 중..."):
+                        delete_match_records(to_delete)
+                    st.success(f"{len(to_delete)}건의 경기 기록이 삭제되었습니다. (포인트는 자동 재계산됩니다)")
+                    st.rerun()
+                else:
+                    st.warning("삭제할 경기를 선택해주세요.")
+        else:
+            st.info("해당 날짜의 기록이 없습니다.")
