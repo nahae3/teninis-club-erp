@@ -47,21 +47,44 @@ def get_or_create_worksheet(sheet_name, headers):
 
 @st.cache_data(ttl=60)
 def load_data(sheet_name, expected_headers):
-    """데이터 로드"""
+    """데이터 로드 (오류 수정 버전)"""
     try:
         ws = get_or_create_worksheet(sheet_name, expected_headers)
-        data = ws.get_all_records()
-        df = pd.DataFrame(data)
-        if df.empty:
-            df = pd.DataFrame(columns=expected_headers)
+        
+        # [수정 핵심] get_all_records() 대신 get_all_values() 사용
+        # 이유: get_all_records는 헤더에 빈칸이 있으면 바로 에러를 뿜습니다.
+        all_values = ws.get_all_values()
+        
+        # 데이터가 아예 없거나 헤더만 있는 경우 처리
+        if len(all_values) <= 1:
+            return pd.DataFrame(columns=expected_headers)
+            
+        # 1행을 헤더로, 나머지를 데이터로 변환
+        headers = all_values[0]
+        data = all_values[1:]
+        
+        # 데이터프레임 생성
+        df = pd.DataFrame(data, columns=headers)
+        
+        # 우리가 필요한 컬럼만 쏙 뽑아내기 (빈 컬럼 무시)
+        # 시트에 '점수', '이름' 등이 있어도 우리가 코드에서 요청한(expected_headers) 것만 가져옵니다.
+        existing_cols = [col for col in expected_headers if col in df.columns]
+        df = df[existing_cols]
+        
+        # 모든 컬럼을 문자열로 변환 (안정성 확보)
         for col in df.columns:
             df[col] = df[col].astype(str)
+            
+        # 숫자형 컬럼 복구 (점수 계산용)
         if '점수1' in df.columns: df['점수1'] = pd.to_numeric(df['점수1'], errors='coerce').fillna(0).astype(int)
         if '점수2' in df.columns: df['점수2'] = pd.to_numeric(df['점수2'], errors='coerce').fillna(0).astype(int)
+            
         return df
     except Exception as e:
-        st.error(f"데이터 로드 중 오류: {e}")
+        # 에러가 나도 멈추지 않고 빈 껍데기를 반환해서 프로그램이 꺼지는 걸 방지
+        st.error(f"⚠️ '{sheet_name}' 시트 로드 중 경고: {e}")
         return pd.DataFrame(columns=expected_headers)
+
 
 def add_member_to_db(name, memo):
     """회원 추가"""
