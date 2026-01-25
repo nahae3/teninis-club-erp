@@ -830,7 +830,7 @@ elif menu == "🏟️ 경기 운영":
                                 else:
                                     st.success(f"{scores[key]['s1']} : {scores[key]['s2']}")
 
-# [3] Elo 랭킹 & 분석
+# [3] 랭킹 & 분석
 elif menu == "📊 랭킹 & 분석":
     st.header("🏆 포인트 랭킹")
     st.markdown("기본 1000점 시작. 승리시 점수 획득, 패배시 차감. (상대 실력에 따라 가중치 적용)")
