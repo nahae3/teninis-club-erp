@@ -20,14 +20,16 @@ except:
     plt.rcParams['font.family'] = 'AppleGothic' 
 plt.rcParams['axes.unicode_minus'] = False
 
-# --- [CORE] 구글 시트 연결 설정 ---
+# --- [CORE] 구글 시트 연결 설정 (수정됨) ---
 def get_google_sheet_connection():
     try:
-        # Streamlit Secrets에서 JSON 키 가져오기
-        json_content = json.loads(st.secrets["gcp_service_account"]["json_key"])
+        # [변경 핵심] json_key를 찾는 게 아니라, 입력한 설정 전체를 바로 딕셔너리로 가져옴
+        json_content = dict(st.secrets["gcp_service_account"])
+        
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
         creds = ServiceAccountCredentials.from_json_keyfile_dict(json_content, scope)
         client = gspread.authorize(creds)
+        
         # 스프레드시트 열기
         spreadsheet = client.open("테니스클럽_DB")
         return spreadsheet
@@ -36,6 +38,7 @@ def get_google_sheet_connection():
         st.stop()
 
 spreadsheet = get_google_sheet_connection()
+
 
 # --- 데이터 관리 함수 (구글 시트 버전) ---
 
