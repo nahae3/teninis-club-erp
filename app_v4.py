@@ -896,6 +896,9 @@ elif menu == "📊 Elo 랭킹 & 분석":
         # -------------------------------------------------------
         # [수정] 랭킹 테이블 (data_color 옵션 제거하여 오류 해결)
         # -------------------------------------------------------
+        # -------------------------------------------------------
+        # [수정] 랭킹 테이블 (Numpy 타입을 int로 강제 변환하여 JSON 오류 해결)
+        # -------------------------------------------------------
         st.dataframe(
             rank_df,
             column_config={
@@ -904,9 +907,9 @@ elif menu == "📊 Elo 랭킹 & 분석":
                     "포인트 (Elo)",
                     help="Elo 랭킹 포인트",
                     format="%d pts",
-                    min_value=min_score,
-                    max_value=max_score + 100, 
-                    # data_color="#FF4B4B",  <-- 이 줄이 에러의 원인이었습니다. 삭제했습니다!
+                    # ★ 여기가 핵심 수정 포인트입니다! int()로 감싸줍니다. ★
+                    min_value=int(min_score),  
+                    max_value=int(max_score) + 100, 
                 ),
                 "승률": st.column_config.TextColumn("승률"),
                 "승": st.column_config.NumberColumn("승"),
@@ -915,6 +918,7 @@ elif menu == "📊 Elo 랭킹 & 분석":
             },
             use_container_width=True
         )
+
 
         st.divider()
         
