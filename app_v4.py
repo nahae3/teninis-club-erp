@@ -685,10 +685,10 @@ elif menu == "📊 Elo 랭킹 & 분석":
     df = load_data("경기기록", ["날짜", "승리팀", "팀1", "팀2", "점수1", "점수2"])
     
     if not df.empty:
-        # 2. 전체 통계 계산
+        # 2. 전체 통계 계산 (기존 유지)
         stats = get_player_stats_and_elo(df, member_df["이름"].tolist())
         
-        # 3. 랭킹 테이블 만들기 (전체 랭킹)
+        # 3. 랭킹 테이블
         rank_data = []
         for p, d in stats.items():
             if d['경기'] > 0:
@@ -721,7 +721,7 @@ elif menu == "📊 Elo 랭킹 & 분석":
             if selected_player:
                 p_stat = stats.get(selected_player)
                 
-                # (1) 기본 스탯 (가장 먼저)
+                # (1) 기본 스탯
                 c1, c2, c3, c4 = st.columns(4)
                 c1.metric("🏅 랭킹 포인트", f"{p_stat['point']}점")
                 c2.metric("총 경기수", f"{p_stat['경기']}전")
@@ -729,12 +729,12 @@ elif menu == "📊 Elo 랭킹 & 분석":
                 c3.metric("승률", f"{win_rate_val:.1f}%")
                 c4.metric("종합 전적", f"{p_stat['승']}승 {p_stat['무']}무 {p_stat['패']}패")
                 
-                st.write("") # 여백
+                st.write("") 
 
                 # (2) 최근 경기 기록
                 st.markdown("##### 📜 최근 경기 기록 (Last 10 Matches)")
                 
-                # 내가 낀 경기만 필터링 (이름 포함 여부로 검색)
+                # 내 경기 필터링
                 mask = df['팀1'].apply(lambda x: selected_player in str(x)) | \
                        df['팀2'].apply(lambda x: selected_player in str(x))
                 my_matches = df[mask].copy()
@@ -744,11 +744,20 @@ elif menu == "📊 Elo 랭킹 & 분석":
                 if not recent_matches.empty:
                     display_history = []
                     for _, row in recent_matches.iterrows():
+                        # 점수 기반 승패 판정
+                        try:
+                            s1 = int(row['점수1'])
+                            s2 = int(row['점수2'])
+                        except:
+                            s1, s2 = 0, 0 # 에러 방지
+
                         result_icon = "❓"
-                        # 승리 판별 로직 강화
-                        if row['승리팀'] == "무승부": result_icon = "🤝 무"
-                        elif selected_player in str(row['승리팀']): result_icon = "✅ 승"
-                        else: result_icon = "❌ 패"
+                        if s1 == s2:
+                            result_icon = "🤝 무"
+                        elif selected_player in str(row['팀1']):
+                            result_icon = "✅ 승" if s1 > s2 else "❌ 패"
+                        elif selected_player in str(row['팀2']):
+                            result_icon = "✅ 승" if s2 > s1 else "❌ 패"
                         
                         display_history.append({
                             "날짜": row['날짜'],
@@ -762,104 +771,109 @@ elif menu == "📊 Elo 랭킹 & 분석":
 
                 st.divider()
 
-                # (3) 🧪 특별 관계 분석 (버그 수정됨)
+                # (3) 🧪 4대 천왕 분석 (점수 기반 완벽 수정)
                 st.markdown("##### 🧪 4대 천왕 분석 (파트너 & 천적)")
                 
-                # 통계 초기화
                 teammate_stats = {} 
                 opponent_stats = {} 
                 
                 for _, row in my_matches.iterrows():
-                    # 이름 파싱 (콤마, 공백 제거 후 리스트화)
-                    # 예: "김고은, 공유" -> ["김고은", "공유"]
-                    t1_raw = str(row['팀1']).replace(',', ' ')
-                    t2_raw = str(row['팀2']).replace(',', ' ')
-                    t1 = t1_raw.split()
-                    t2 = t2_raw.split()
+                    # 이름 파싱
+                    t1_raw = str(row['팀1']).replace(',', ' ').split()
+                    t2_raw = str(row['팀2']).replace(',', ' ').split()
                     
-                    my_team, opp_team = [], []
+                    # 점수 파싱
+                    try:
+                        score1 = int(row['점수1'])
+                        score2 = int(row['점수2'])
+                    except:
+                        continue # 점수 에러나면 건너뜀
+
+                    # 승리 여부 판단 (점수로 판단!)
+                    did_i_win = False
+                    my_team = []
+                    opp_team = []
+
+                    if selected_player in t1_raw:
+                        my_team = t1_raw
+                        opp_team = t2_raw
+                        if score1 > score2: did_i_win = True
+                    elif selected_player in t2_raw:
+                        my_team = t2_raw
+                        opp_team = t1_raw
+                        if score2 > score1: did_i_win = True
                     
-                    # [수정된 승리 판별 로직]
-                    # 문자열이 정확히 일치하지 않아도, 승리팀 명단에 내 이름이 있으면 승리!
-                    is_win = selected_player in str(row['승리팀'])
-                    
-                    # 팀 구분
-                    if selected_player in t1:
-                        my_team = t1
-                        opp_team = t2
-                    elif selected_player in t2:
-                        my_team = t2
-                        opp_team = t1
-                    
-                    # 1. 팀원 분석 (나랑 같은 팀이었던 사람들)
+                    # 무승부는 승률 계산에서 제외 (승리만 체크)
+                    if score1 == score2:
+                        continue
+
+                    # 1. 팀원 분석
                     for m in my_team:
-                        if m != selected_player: # 나는 제외
+                        if m != selected_player:
                             if m not in teammate_stats: teammate_stats[m] = {'승':0, '경기':0}
                             teammate_stats[m]['경기'] += 1
-                            if is_win: teammate_stats[m]['승'] += 1
+                            if did_i_win: teammate_stats[m]['승'] += 1
                     
-                    # 2. 상대 분석 (적이었던 사람들)
+                    # 2. 상대 분석
                     for m in opp_team:
                         if m != selected_player:
                             if m not in opponent_stats: opponent_stats[m] = {'승':0, '경기':0}
                             opponent_stats[m]['경기'] += 1
-                            if is_win: opponent_stats[m]['승'] += 1
+                            if did_i_win: opponent_stats[m]['승'] += 1 # 내가 이기면 -> 먹잇감
                 
-                # 정렬 함수 (승률 높은 순 -> 경기수 많은 순)
+                # 정렬 함수
                 def sort_stats(d):
                     lst = []
                     for k, v in d.items():
                         rate = (v['승'] / v['경기']) * 100
                         lst.append((k, rate, v['승'], v['경기']))
+                    # 승률 높은 순 -> 경기 많은 순
                     return sorted(lst, key=lambda x: (x[1], x[3]), reverse=True)
                 
                 sorted_team = sort_stats(teammate_stats)
                 sorted_opp = sort_stats(opponent_stats)
                 
-                # 결과 출력
                 if sorted_team or sorted_opp:
                     col_best, col_worst = st.columns(2)
                     
-                    # [왼쪽] 환상의 짝꿍
+                    # 환상의 짝꿍 (팀 승률 1위)
                     with col_best:
                         if sorted_team:
-                            best = sorted_team[0] # 승률 1등
+                            best = sorted_team[0]
                             st.success(f"💙 **환상의 짝꿍**: {best[0]}")
                             st.caption(f"함께 승률 {best[1]:.1f}% ({best[3]}전 {best[2]}승)")
                         else:
-                            st.info("아직 팀 기록이 없습니다.")
+                            st.info("기록 없음")
 
-                    # [오른쪽] 맛있는 먹잇감 (내가 가장 많이 이긴 상대)
+                    # 맛있는 먹잇감 (내가 이긴 비율이 높은 상대)
                     with col_worst:
                         if sorted_opp:
-                            prey = sorted_opp[0] # 내가 이긴 승률 1등
+                            prey = sorted_opp[0]
                             st.success(f"🍖 **맛있는 먹잇감**: {prey[0]}")
                             st.caption(f"상대 승률 {prey[1]:.1f}% ({prey[3]}전 {prey[2]}승)")
                         else:
-                            st.info("아직 상대 기록이 없습니다.")
+                            st.info("기록 없음")
 
                     col_xman, col_nemesis = st.columns(2)
 
-                    # [왼쪽 아래] 억제기 (나랑 했을 때 승률 꼴찌)
+                    # 억제기 (팀 승률 최하위)
                     with col_xman:
                         if sorted_team:
                             xman = sorted_team[-1]
-                            # 데이터가 1명뿐이면 짝꿍이자 X맨이 될 수 있음, 2명 이상일때만 표시하거나 그냥 표시
-                            color = "error" if xman[1] < 50 else "warning"
                             st.error(f"💔 **억제기 (X맨)**: {xman[0]}")
                             st.caption(f"함께 승률 {xman[1]:.1f}% ({xman[3]}전 {xman[2]}승)")
                         
-                    # [오른쪽 아래] 천적 (내가 가장 많이 진 상대)
+                    # 천적 (내가 이긴 비율이 낮은 상대)
                     with col_nemesis:
                         if sorted_opp:
                             nemesis = sorted_opp[-1]
                             st.error(f"👿 **천적 (담당일진)**: {nemesis[0]}")
                             st.caption(f"상대 승률 {nemesis[1]:.1f}% ({nemesis[3]}전 {nemesis[2]}승)")
                 else:
-                    st.info("⚠️ 분석을 위한 경기 데이터가 충분하지 않습니다.")
+                    st.info("⚠️ 분석 데이터 부족")
                     
         else:
-            st.info("등록된 선수가 없습니다.")
+            st.info("선수가 없습니다.")
     else:
         st.info("경기 기록이 없습니다.")
 
