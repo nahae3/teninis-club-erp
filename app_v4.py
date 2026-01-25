@@ -47,43 +47,54 @@ def get_or_create_worksheet(sheet_name, headers):
 
 @st.cache_data(ttl=60)
 def load_data(sheet_name, expected_headers):
-    """데이터 로드 (오류 수정 버전)"""
+    """데이터 로드 (KeyError 방지 + 헤더 공백 제거 버전)"""
     try:
         ws = get_or_create_worksheet(sheet_name, expected_headers)
         
-        # [수정 핵심] get_all_records() 대신 get_all_values() 사용
-        # 이유: get_all_records는 헤더에 빈칸이 있으면 바로 에러를 뿜습니다.
+        # 1. 값만 전부 가져옴 (헤더 오류 방지)
         all_values = ws.get_all_values()
         
-        # 데이터가 아예 없거나 헤더만 있는 경우 처리
+        # 데이터가 없으면 빈 프레임 반환
         if len(all_values) <= 1:
             return pd.DataFrame(columns=expected_headers)
             
-        # 1행을 헤더로, 나머지를 데이터로 변환
-        headers = all_values[0]
+        # 2. 헤더 정리 (양옆 공백 제거: ' 경기ID ' -> '경기ID')
+        # 혹시 빈 칸('')이 제목으로 있으면 'Unknown_번호'로 바꿔서 에러 방지
+        headers = []
+        for i, h in enumerate(all_values[0]):
+            clean_h = str(h).strip()
+            if not clean_h: 
+                clean_h = f"Unknown_{i}"
+            headers.append(clean_h)
+            
         data = all_values[1:]
         
-        # 데이터프레임 생성
+        # 3. 데이터프레임 생성
         df = pd.DataFrame(data, columns=headers)
         
-        # 우리가 필요한 컬럼만 쏙 뽑아내기 (빈 컬럼 무시)
-        # 시트에 '점수', '이름' 등이 있어도 우리가 코드에서 요청한(expected_headers) 것만 가져옵니다.
-        existing_cols = [col for col in expected_headers if col in df.columns]
-        df = df[existing_cols]
+        # 4. [핵심] 코드에서 필요로 하는 컬럼(expected_headers)이 없으면 강제로 생성
+        # (이 부분이 없어서 KeyError가 났던 것입니다!)
+        for required_col in expected_headers:
+            if required_col not in df.columns:
+                df[required_col] = "" # 없으면 빈 값으로라도 채움
         
-        # 모든 컬럼을 문자열로 변환 (안정성 확보)
-        for col in df.columns:
-            df[col] = df[col].astype(str)
-            
-        # 숫자형 컬럼 복구 (점수 계산용)
-        if '점수1' in df.columns: df['점수1'] = pd.to_numeric(df['점수1'], errors='coerce').fillna(0).astype(int)
-        if '점수2' in df.columns: df['점수2'] = pd.to_numeric(df['점수2'], errors='coerce').fillna(0).astype(int)
+        # 5. 필요한 컬럼만 순서대로 정렬해서 가져옴
+        df = df[expected_headers]
+        
+        # 6. 숫자형 데이터 안전하게 변환
+        # (점수 컬럼이 있는데 빈 문자열이면 0으로 처리)
+        if '점수1' in df.columns: 
+            df['점수1'] = pd.to_numeric(df['점수1'], errors='coerce').fillna(0).astype(int)
+        if '점수2' in df.columns: 
+            df['점수2'] = pd.to_numeric(df['점수2'], errors='coerce').fillna(0).astype(int)
             
         return df
+        
     except Exception as e:
-        # 에러가 나도 멈추지 않고 빈 껍데기를 반환해서 프로그램이 꺼지는 걸 방지
-        st.error(f"⚠️ '{sheet_name}' 시트 로드 중 경고: {e}")
+        # 그래도 에러나면 로그 찍고 빈 껍데기 반환 (앱 중단 방지)
+        print(f"⚠️ Load Error ({sheet_name}): {e}") 
         return pd.DataFrame(columns=expected_headers)
+
 
 
 def add_member_to_db(name, memo):
