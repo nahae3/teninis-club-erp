@@ -294,7 +294,7 @@ st.title("🎾 Sunday Smashers V5.2")
 # 인증 확인 (관리자 모드 활성화 여부)
 is_admin = check_admin()
 
-menu = st.sidebar.radio("메뉴", ["📺 실시간 현황판", "👥 회원 관리", "🏟️ 경기 운영", "📊 Elo 랭킹 & 분석", "📝 경기 기록 관리"])
+menu = st.sidebar.radio("메뉴", ["📺 실시간 현황판", "👥 회원 관리", "🏟️ 경기 운영", "📊 랭킹 & 분석", "📝 경기 기록 관리"])
 
 # --- [NEW] 관리자용 데이터 백업 버튼 (사이드바) ---
 if is_admin:
