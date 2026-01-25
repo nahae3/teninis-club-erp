@@ -289,7 +289,7 @@ def draw_bracket_plot(teams_4):
     return fig
 
 # --- UI 시작 ---
-st.title("🎾 가칭:행님들 테니스 V5.2")
+st.title("🎾 Sunday Smashers V5.2")
 
 # 인증 확인 (관리자 모드 활성화 여부)
 is_admin = check_admin()
@@ -574,18 +574,29 @@ elif menu == "🏟️ 경기 운영":
                                 add_match_record(winners['semi_1'], winners['semi_2'], s1, s2)
                                 st.balloons(); st.rerun()
 
-        # 2.3 팀 대항전
+         # 2.3 팀 대항전
     with mode_tab3:
         st.subheader("⚔️ 팀 대항전 (Team Battle)")
         
         # 1. 초기화 및 설정
-        if 'battle_teams' not in st.session_state: st.session_state.battle_teams = {'A': [], 'B': []}
-        if 'battle_matches' not in st.session_state: st.session_state.battle_matches = []
-        if 'battle_active' not in st.session_state: st.session_state.battle_active = False
+        # 팀 정보가 세션에 없으면 빈 리스트로 초기화
+        if 'battle_teams' not in st.session_state: 
+            st.session_state.battle_teams = {'A': [], 'B': []}
+        if 'battle_matches' not in st.session_state: 
+            st.session_state.battle_matches = []
+        if 'battle_active' not in st.session_state: 
+            st.session_state.battle_active = False
 
-        # 참석자 명단 (전체 멤버에서 선택)
+        # 참석자 명단 가져오기
         members_list = member_df["이름"].tolist() if not member_df.empty else []
-        att_battle = st.multiselect("참석자 선택", members_list, default=members_list[:8] if len(members_list)>=8 else members_list, key="att_battle")
+        
+        # [수정] default=[] 로 설정하여 처음에 아무도 선택되지 않게 함
+        att_battle = st.multiselect(
+            "참석자 선택", 
+            members_list, 
+            default=[],  # <--- 여기가 핵심! 빈 리스트로 시작
+            key="att_battle"
+        )
 
         if len(att_battle) < 4:
             st.warning("최소 4명 이상 선택해야 팀을 나눌 수 있습니다.")
@@ -600,9 +611,12 @@ elif menu == "🏟️ 경기 운영":
 
             # [Step 1] 팀 나누기 버튼
             if st.button("👥 팀 나누기 실행", key="btn_split_team", use_container_width=True):
+                # 팀 나누기 로직 실행 시 기존 세션 초기화
+                st.session_state.battle_teams = {'A': [], 'B': []} 
+                
                 if battle_mode == "⚖️ Elo 밸런스":
                     try:
-                        # G열(승리팀) 읽기 로직 적용된 데이터 로드
+                        # G열(승리팀) 읽기 로직
                         ws = spreadsheet.worksheet("경기기록")
                         rows = ws.get_all_values()
                         clean_data = []
@@ -613,7 +627,6 @@ elif menu == "🏟️ 경기 운영":
                         hist_df = pd.DataFrame(clean_data)
                         stats = get_player_stats_and_elo(hist_df, members_list)
                         
-                        # Elo 점수순 정렬 후 지그재그 배정 (1등->A, 2등->B, 3등->A...)
                         sorted_att = sorted(att_battle, key=lambda x: stats.get(x, {}).get('point', 1000), reverse=True)
                         st.session_state.battle_teams['A'] = sorted_att[0::2]
                         st.session_state.battle_teams['B'] = sorted_att[1::2]
@@ -637,21 +650,32 @@ elif menu == "🏟️ 경기 운영":
                     st.session_state.battle_teams['B'] = []
                     st.info("아래에서 직접 팀원을 배정해주세요.")
                 
-                # 팀 재편성 시 기존 대진표 초기화
+                # 팀 재편성 시 기존 대진표 및 진행상태 초기화
                 st.session_state.battle_matches = []
                 st.session_state.battle_active = False
 
-            # [Step 2] 팀 확인 및 조정 (수동 수정 가능)
+            # [Step 2] 팀 확인 및 조정
             col_a, col_b = st.columns(2)
             with col_a:
                 st.markdown("### 🅰️ A팀")
-                new_a = st.multiselect("A팀 명단", att_battle, default=st.session_state.battle_teams['A'], key="ms_team_a")
+                # A팀 명단이 없으면 빈칸, 있으면 세션값 사용
+                current_a = [m for m in st.session_state.battle_teams['A'] if m in att_battle]
+                new_a = st.multiselect("A팀 명단", att_battle, default=current_a, key="ms_team_a")
             with col_b:
                 st.markdown("### 🅱️ B팀")
+                # B팀 명단: 전체 참석자 중 A팀 제외한 인원 (자동 계산)
+                # 만약 세션에 B팀이 이미 있고 + 수동모드가 아니면 세션값 우선, 아니면 나머지 자동
                 remain = [x for x in att_battle if x not in new_a]
-                new_b = st.multiselect("B팀 명단", att_battle, default=remain, key="ms_team_b")
+                
+                # UI 편의성: 팀 나누기 버튼을 안 눌렀을 때는(초기) 빈칸으로, 눌렀으면 자동 채움
+                if not st.session_state.battle_teams['B'] and not st.session_state.battle_teams['A']:
+                     default_b = [] # 초기 상태면 비움
+                else:
+                     default_b = remain # 팀 나누기 후엔 나머지 자동 채움
+
+                new_b = st.multiselect("B팀 명단", att_battle, default=default_b, key="ms_team_b")
             
-            # 세션 업데이트
+            # 세션 실시간 동기화
             st.session_state.battle_teams['A'] = new_a
             st.session_state.battle_teams['B'] = new_b
 
@@ -663,11 +687,9 @@ elif menu == "🏟️ 경기 운영":
                     st.error("팀원이 배정되지 않았습니다.")
                 else:
                     import itertools
-                    # 각 팀 복식 조합 생성
                     pairs_a = list(itertools.combinations(new_a, 2))
                     pairs_b = list(itertools.combinations(new_b, 2))
                     
-                    # 인원 부족 시(단식/홀수) 자기 자신과 복제하여 처리
                     if not pairs_a: pairs_a = [(m, m) for m in new_a]
                     if not pairs_b: pairs_b = [(m, m) for m in new_b]
                     
@@ -690,11 +712,9 @@ elif menu == "🏟️ 경기 운영":
                     st.session_state.battle_active = True
                     st.rerun()
 
-            # [Step 4] 경기 진행 (Scoreboard & Live Share)
+            # [Step 4] 경기 진행
             if st.session_state.battle_active:
                 matches = st.session_state.battle_matches
-                
-                # 점수 계산
                 sa = sum(1 for m in matches if m['winner'] == 'A')
                 sb = sum(1 for m in matches if m['winner'] == 'B')
                 
@@ -704,14 +724,12 @@ elif menu == "🏟️ 경기 운영":
                 </div>
                 """, unsafe_allow_html=True)
 
-                # 현황판 공유 버튼
                 if st.button("📢 실시간 현황판(구글시트) 송출", use_container_width=True, key="btn_share_live"):
                     try:
                         try: ws_live = spreadsheet.worksheet("실시간현황")
                         except: ws_live = spreadsheet.add_worksheet("실시간현황", 100, 10)
                         ws_live.clear()
                         ws_live.append_row(["경기", "A팀", "VS", "B팀", "점수", "상태", "업데이트"])
-                        
                         rows = []
                         now = datetime.now().strftime("%H:%M")
                         for m in matches:
@@ -723,7 +741,6 @@ elif menu == "🏟️ 경기 운영":
                     except Exception as e:
                         st.error(f"전송 실패: {e}")
 
-                # 경기 리스트 및 결과 입력
                 for i, m in enumerate(matches):
                     status_icon = "✅" if m['done'] else "🔥"
                     exp_label = f"Game {m['round']} : {m['t1']} vs {m['t2']} {status_icon}"
@@ -739,16 +756,12 @@ elif menu == "🏟️ 경기 운영":
                                 if s1_val == s2_val:
                                     st.warning("무승부는 저장할 수 없습니다.")
                                 else:
-                                    # 결과 메모리 반영
                                     m['s1'], m['s2'] = s1_val, s2_val
                                     m['winner'] = 'A' if s1_val > s2_val else 'B'
                                     m['done'] = True
-                                    
-                                    # DB(구글시트) 저장
                                     try:
                                         ws_rec = spreadsheet.worksheet("경기기록")
                                         win_name = m['t1'] if m['winner'] == 'A' else m['t2']
-                                        # 저장 형식: [날짜, ID, 팀1, 팀2, 점수1, 점수2, 승리팀]
                                         ws_rec.append_row([
                                             datetime.now().strftime("%Y-%m-%d %H:%M"),
                                             datetime.now().strftime("%Y%m%d%H%M%S"),
@@ -881,7 +894,7 @@ elif menu == "📊 Elo 랭킹 & 분석":
         min_score = 800 # 그래프 최소치 설정 (시각적 효과 위해)
 
         # -------------------------------------------------------
-        # [수정 1] 빨간색 막대 그래프가 들어간 테이블 디자인
+        # [수정] 랭킹 테이블 (data_color 옵션 제거하여 오류 해결)
         # -------------------------------------------------------
         st.dataframe(
             rank_df,
@@ -892,8 +905,8 @@ elif menu == "📊 Elo 랭킹 & 분석":
                     help="Elo 랭킹 포인트",
                     format="%d pts",
                     min_value=min_score,
-                    max_value=max_score + 100, # 여유분
-                    data_color="#FF4B4B", # ★ 형님이 원하신 빨간색!
+                    max_value=max_score + 100, 
+                    # data_color="#FF4B4B",  <-- 이 줄이 에러의 원인이었습니다. 삭제했습니다!
                 ),
                 "승률": st.column_config.TextColumn("승률"),
                 "승": st.column_config.NumberColumn("승"),
@@ -902,7 +915,7 @@ elif menu == "📊 Elo 랭킹 & 분석":
             },
             use_container_width=True
         )
-        
+
         st.divider()
         
         # -------------------------------------------------------
