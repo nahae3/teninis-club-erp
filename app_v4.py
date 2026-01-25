@@ -866,39 +866,105 @@ elif menu == "📊 Elo 랭킹 & 분석":
 
 
 
-# [4] 경기 기록 관리
+# [4] 경기 기록 관리 (밀린 데이터 강제 인식 버전)
 elif menu == "📝 경기 기록 관리":
-    st.header("📝 경기 기록 관리 (구글 시트 연동됨)")
-    df = load_data("경기기록", ["날짜", "경기ID", "팀1", "팀2", "점수1", "점수2", "승리팀"])
+    st.header("📝 경기 기록 관리 (삭제 및 조회)")
+    
+    # [수정 포인트 1] load_data 대신 직접 위치로 긁어옵니다.
+    # 이유: 헤더랑 실제 데이터 위치가 안 맞아서 강제로 매핑해야 함
+    try:
+        ws = spreadsheet.worksheet("경기기록")
+        all_values = ws.get_all_values()
+        
+        if len(all_values) > 1:
+            raw_data = all_values[1:] # 헤더 제외 데이터
+            clean_data = []
+            
+            for row in raw_data:
+                if len(row) < 7: continue # 데이터 너무 짧으면 패스
+                
+                # [수정 포인트 2] 시트 위치에 맞춰 강제 할당
+                # B열(인덱스 1)을 '경기ID'로 사용
+                # G열(인덱스 6)을 '승리팀'으로 사용
+                clean_data.append({
+                    "날짜": row[0],        # A열
+                    "경기ID": row[1],      # B열 (여기에 이상한 날짜숫자가 ID 역할)
+                    "승리팀": row[6],      # G열 (밀려난 승리팀)
+                    "팀1": row[2],         # C열
+                    "팀2": row[3],         # D열
+                    "점수1": row[4],       # E열
+                    "점수2": row[5]        # F열
+                })
+            
+            df = pd.DataFrame(clean_data)
+        else:
+            df = pd.DataFrame()
+            
+    except Exception as e:
+        st.error(f"데이터 로드 실패: {e}")
+        df = pd.DataFrame()
+
+    # ------------------------------------------------
+    # 이 밑으로는 형님 코드와 기능(필터, 삭제)이 같습니다.
+    # ------------------------------------------------
     
     if df.empty:
         st.info("저장된 경기 기록이 없습니다.")
     else:
+        # 날짜 필터링 (형님 코드 유지)
         df['날짜_short'] = df['날짜'].astype(str).apply(lambda x: x.split(' ')[0] if len(str(x)) > 5 else x)
         dates = sorted(df['날짜_short'].unique(), reverse=True)
-        selected_date = st.selectbox("📅 날짜 선택", dates)
-        filtered_df = df[df['날짜_short'] == selected_date].copy()
         
-        if not filtered_df.empty:
-            st.write(f"총 {len(filtered_df)}개의 경기가 있습니다.")
-            filtered_df['삭제'] = False
-            edited_df = st.data_editor(
-                filtered_df[['삭제', '날짜', '팀1', '팀2', '점수1', '점수2', '승리팀', '경기ID']],
-                column_config={
-                    "삭제": st.column_config.CheckboxColumn("선택", help="삭제할 경기를 선택하세요"),
-                    "경기ID": None
-                },
-                hide_index=True,
-                width="stretch"
-            )
-            if st.button("🗑️ 선택한 경기 삭제"):
-                to_delete = edited_df[edited_df['삭제']]['경기ID'].tolist()
-                if to_delete:
-                    with st.spinner("구글 시트에서 삭제 중..."):
-                        delete_match_records(to_delete)
-                    st.success(f"{len(to_delete)}건의 경기 기록이 삭제되었습니다. (포인트는 자동 재계산됩니다)")
-                    st.rerun()
-                else:
-                    st.warning("삭제할 경기를 선택해주세요.")
-        else:
-            st.info("해당 날짜의 기록이 없습니다.")
+        if dates:
+            selected_date = st.selectbox("📅 날짜 선택", dates)
+            filtered_df = df[df['날짜_short'] == selected_date].copy()
+            
+            if not filtered_df.empty:
+                st.write(f"총 {len(filtered_df)}개의 경기가 있습니다.")
+                
+                # 삭제 기능을 위한 체크박스 추가
+                filtered_df.insert(0, "삭제", False)
+                
+                # 데이터 에디터 설정
+                edited_df = st.data_editor(
+                    filtered_df,
+                    column_config={
+                        "삭제": st.column_config.CheckboxColumn("선택", help="삭제할 경기 선택"),
+                        "경기ID": None, # ID는 숨김 처리 (너무 길어서)
+                        "날짜_short": None
+                    },
+                    hide_index=True,
+                    use_container_width=True
+                )
+                
+                # 삭제 버튼 로직
+                if st.button("🗑️ 선택한 경기 삭제"):
+                    # 체크된 행의 '경기ID' (실제론 B열 값)를 가져옴
+                    to_delete = edited_df[edited_df['삭제']]['경기ID'].tolist()
+                    
+                    if to_delete:
+                        with st.spinner("구글 시트에서 삭제 중..."):
+                            # delete_match_records 함수가 있다고 가정 (기존에 가지고 계신 함수)
+                            # 단, 이 함수가 '경기ID'를 B열에서 찾아서 지우는지 확인 필요
+                            # 없다면 아래처럼 직접 구현해야 함:
+                            
+                            # [간단 삭제 로직 구현]
+                            ws = spreadsheet.worksheet("경기기록")
+                            # 뒤에서부터 지워야 인덱스가 안 꼬임
+                            rows_all = ws.get_all_values()
+                            rows_to_delete_indices = []
+                            
+                            for idx, r in enumerate(rows_all):
+                                if len(r) > 1 and r[1] in to_delete: # B열(인덱스1)이 ID랑 같으면
+                                    rows_to_delete_indices.append(idx + 1) # 1-based index
+                            
+                            for r_idx in sorted(rows_to_delete_indices, reverse=True):
+                                ws.delete_rows(r_idx)
+                                
+                        st.success(f"{len(to_delete)}건 삭제 완료! (새로고침 됩니다)")
+                        st.cache_data.clear() # 캐시 비우기
+                        st.rerun()
+                    else:
+                        st.warning("삭제할 경기를 선택해주세요.")
+            else:
+                st.info("선택한 날짜에 기록이 없습니다.")
