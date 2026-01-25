@@ -10,7 +10,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 import json
 
 # --- 설정 및 한글 폰트 ---
-st.set_page_config(page_title="행님표 테니스 ERP V5.2", page_icon="🎾", layout="wide")
+st.set_page_config(page_title="Sunday Smashers V5.2", page_icon="🎾", layout="wide")
 
 # [폰트 설정]
 try:
@@ -423,7 +423,7 @@ elif menu == "👥 회원 관리":
 # [2] 경기 운영
 elif menu == "🏟️ 경기 운영":
     st.header("🏟️ 경기 운영 시스템")
-    mode_tab1, mode_tab2, mode_tab3, mode_tab4 = st.tabs(["🔄 일반 매칭", "🏆 토너먼트", "⚔️ 팀 대항전", "🔢 KDK"])
+    mode_tab1, mode_tab2, mode_tab3, mode_tab4 = st.tabs(["🔄 일반 매칭", "🏆 토너먼트", "⚔️ 팀 대항전", "🔢 KDK(개인전)"])
     member_df = load_data("회원정보", ["이름"])
     
     # 2.1 일반 매칭
@@ -432,7 +432,7 @@ elif menu == "🏟️ 경기 운영":
             attendees = st.multiselect("출석 체크", member_df["이름"].tolist(), key="league_att")
             c1, c2 = st.columns(2)
             with c1: target_games = st.slider("인당 게임 수", 1, 6, 3)
-            with c2: match_mode = st.radio("방식", ["🎲 랜덤", "⚖️ AI밸런스"], horizontal=True, key="league_mode")
+            with c2: match_mode = st.radio("방식", ["🎲 랜덤", "⚖️ ELO밸런스"], horizontal=True, key="league_mode")
             
             # 생성 버튼 (누구나 눌러볼 수는 있게 함, 저장은 관리자)
             if st.button("🚀 대진표 생성", type="primary"):
@@ -484,7 +484,7 @@ elif menu == "🏟️ 경기 운영":
             t_attendees = st.multiselect("참가 선수", member_df["이름"].tolist(), key="tourney_att")
             c1, c2 = st.columns(2)
             with c1: team_cnt = st.selectbox("팀 수", [4, 5, 6, 7, 8])
-            with c2: team_method = st.selectbox("방식", ["⚖️ AI밸런스", "🎲 랜덤", "👆 수동"])
+            with c2: team_method = st.selectbox("방식", ["⚖️ ELO밸런스", "🎲 랜덤", "👆 수동"])
             
             # ... (수동 팀 설정 로직) ...
             manual_teams = [] # (간소화)
@@ -831,8 +831,8 @@ elif menu == "🏟️ 경기 운영":
                                     st.success(f"{scores[key]['s1']} : {scores[key]['s2']}")
 
 # [3] Elo 랭킹 & 분석
-elif menu == "📊 Elo 랭킹 & 분석":
-    st.header("🏆 Elo 포인트 랭킹")
+elif menu == "📊 랭킹 & 분석":
+    st.header("🏆 포인트 랭킹")
     st.markdown("기본 1000점 시작. 승리시 점수 획득, 패배시 차감. (상대 실력에 따라 가중치 적용)")
     
     # 1. 데이터 로드 (형님 데이터 꼬임 방지 로직 적용됨)
