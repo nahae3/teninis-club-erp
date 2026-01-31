@@ -10,7 +10,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 import json
 
 # --- 설정 및 한글 폰트 ---
-st.set_page_config(page_title="Sunday Smashers V5.2", page_icon="🎾", layout="wide")
+st.set_page_config(page_title="Sunday Smashers V5.3", page_icon="🎾", layout="wide")
 
 # [폰트 설정]
 try:
@@ -328,7 +328,7 @@ def draw_bracket_plot(teams_4):
     return fig
 
 # --- UI 시작 ---
-st.title("🎾 Sunday Smashers V5.2")
+st.title("🎾 Sunday Smashers V5.3")
 
 # 인증 확인 (관리자 모드 활성화 여부)
 is_admin = check_admin()
