@@ -207,31 +207,70 @@ def balance_teams_by_point(players, stats):
         else: team_b.append(p)
     return team_a, team_b
 
+import math
+import random
+
 def generate_league_schedule(attendees, target_games, mode, stats):
     schedule = []
     play_counts = {p: 0 for p in attendees}
     courts_num = len(attendees) // 4
+    
+    # 코트가 0개면 생성 불가
     if courts_num == 0: return []
+    
     total_slots_needed = len(attendees) * target_games
     slots_per_round = courts_num * 4
     total_rounds = math.ceil(total_slots_needed / slots_per_round)
     
     for r in range(total_rounds):
+        # 1. 경기 수가 적은 순서대로 정렬 (동점일 경우 랜덤) -> 로테이션 구현
         waiting_list = sorted(attendees, key=lambda x: (play_counts[x], random.random()))
+        
+        # 2. 이번 라운드 정원만큼 자르기 (예: 9명이면 상위 8명 선택)
         players_for_round = waiting_list[:slots_per_round]
         matches = []
+        
         if mode == "🎲 랜덤 복식":
+            # 무작위로 섞은 뒤 앞에서부터 4명씩 끊어서 매칭
             random.shuffle(players_for_round)
-            for i in range(len(players_for_round)//4):
-                matches.append({"t1": f"{players_for_round[i*4]}, {players_for_round[i*4+1]}", "t2": f"{players_for_round[i*4+2]}, {players_for_round[i*4+3]}"})
+            for i in range(courts_num):
+                base = i * 4
+                p1, p2 = players_for_round[base], players_for_round[base+1]
+                p3, p4 = players_for_round[base+2], players_for_round[base+3]
+                matches.append({"t1": f"{p1}, {p2}", "t2": f"{p3}, {p4}"})
         else:
+            # ⚖️ ELO밸런스 (실력 기반 균등 매칭)
+            # 점수 높은 순으로 정렬
             sorted_p = sorted(players_for_round, key=lambda x: stats.get(x, {}).get('point', 1000), reverse=True)
             n = len(sorted_p)
-            for i in range(n // 4):
-                matches.append({"t1": f"{sorted_p[i]}, {sorted_p[n-1-i]}", "t2": f"{sorted_p[i+1]}, {sorted_p[n-2-i]}"})
+            
+            # [수정 핵심] 인덱스가 겹치지 않도록 '스네이크 방식' 변형 적용
+            # i=0 (1코트): (1등, 꼴등) vs (2등, 꼴등-1)
+            # i=1 (2코트): (3등, 꼴등-2) vs (4등, 꼴등-3)
+            for i in range(courts_num):
+                # High Ranker 인덱스 (0, 2, 4...)
+                h1_idx = 2 * i
+                h2_idx = 2 * i + 1
+                
+                # Low Ranker 인덱스 (뒤에서 0, 2, 4...)
+                l1_idx = n - 1 - (2 * i)
+                l2_idx = n - 1 - (2 * i + 1)
+                
+                # 팀 구성: (잘하는사람 + 못하는사람) 조합으로 밸런스 유지
+                p1 = sorted_p[h1_idx]
+                p2 = sorted_p[l1_idx]
+                p3 = sorted_p[h2_idx]
+                p4 = sorted_p[l2_idx]
+                
+                matches.append({"t1": f"{p1}, {p2}", "t2": f"{p3}, {p4}"})
+                
         schedule.append({"round_num": r + 1, "matches": matches})
+        
+        # 이번 라운드 뛴 사람들 경기 수 증가
         for p in players_for_round: play_counts[p] += 1
+        
     return schedule
+
 
 def generate_kdk_schedule(players, rounds):
     n = len(players)
