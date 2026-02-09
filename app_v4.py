@@ -164,40 +164,176 @@ def calculate_elo_change(rating_a, rating_b, actual_score, k=32):
     change = k * (actual_score - expected_a)
     return change
 
+
+# --- [수정된 함수 1] 랭킹 계산 (중복 제거 기능 추가) ---
 def get_player_stats_and_elo(df, all_members=None):
     stats = {}
     if all_members:
         for p in all_members:
             stats[p] = {"point": 1000, "승": 0, "패": 0, "무": 0, "경기": 0}
+            
     if df.empty: return stats
+
+    # [수정 핵심] 경기ID가 같다면 중복된 데이터로 보고 제거 (가장 마지막 기록 유지)
+    if '경기ID' in df.columns:
+        df = df.drop_duplicates(subset=['경기ID'], keep='last')
+
     if '날짜' in df.columns: df = df.sort_values("날짜")
 
     for _, row in df.iterrows():
         try:
+            # 팀원 이름 분리
             p1, p2 = [p.strip() for p in str(row['팀1']).split(',')]
             p3, p4 = [p.strip() for p in str(row['팀2']).split(',')]
             winner = row['승리팀']
+            
+            # 선수 통계 초기화
             for p in [p1, p2, p3, p4]:
                 if p not in stats: stats[p] = {"point": 1000, "승": 0, "패": 0, "무": 0, "경기": 0}
+            
+            # 경기 수 증가
             for p in [p1, p2, p3, p4]: stats[p]["경기"] += 1
+            
+            # 무승부 처리
             if winner == "무승부":
                 for p in [p1, p2, p3, p4]: stats[p]["무"] += 1
                 continue 
+
             is_team1_win = (winner == row['팀1'])
+            
+            # 승패 기록
             if is_team1_win:
                 for p in [p1, p2]: stats[p]["승"] += 1
                 for p in [p3, p4]: stats[p]["패"] += 1
             else:
                 for p in [p1, p2]: stats[p]["패"] += 1
                 for p in [p3, p4]: stats[p]["승"] += 1
+            
+            # Elo 계산
             team1_avg = (stats[p1]["point"] + stats[p2]["point"]) / 2
             team2_avg = (stats[p3]["point"] + stats[p4]["point"]) / 2
             actual_score = 1 if is_team1_win else 0
             change = calculate_elo_change(team1_avg, team2_avg, actual_score)
+            
             for p in [p1, p2]: stats[p]["point"] += round(change)
             for p in [p3, p4]: stats[p]["point"] -= round(change)
-        except: continue
+            
+        except Exception: 
+            continue
+            
     return stats
+
+# --- [수정된 함수 2] 리그 스케줄 생성 (중복 파트너 방지 로직 추가) ---
+def generate_league_schedule(attendees, target_games, mode, stats):
+    schedule = []
+    play_counts = {p: 0 for p in attendees}
+    courts_num = len(attendees) // 4
+    
+    if courts_num == 0: return []
+    
+    total_slots_needed = len(attendees) * target_games
+    slots_per_round = courts_num * 4
+    total_rounds = math.ceil(total_slots_needed / slots_per_round)
+    
+    # [수정 핵심] 역대 파트너 기록 저장 (순서 상관없는 집합으로 저장)
+    past_pairs = set()
+
+    for r in range(total_rounds):
+        # 경기 수가 적은 순서대로 정렬 (동점일 경우 랜덤)
+        waiting_list = sorted(attendees, key=lambda x: (play_counts[x], random.random()))
+        players_for_round = waiting_list[:slots_per_round]
+        
+        matches = []
+        
+        if mode == "🎲 랜덤 복식":
+            # [수정 핵심] 중복 파트너 방지를 위한 재시도 로직
+            best_permutation = None
+            min_conflicts = 999
+            
+            # 최대 50번 섞어보면서 중복 파트너가 없는 조합을 찾음
+            for _ in range(50):
+                random.shuffle(players_for_round)
+                current_conflicts = 0
+                temp_pairs = []
+                
+                # 가상의 팀을 짜보고 중복 검사
+                for i in range(courts_num):
+                    p1, p2 = players_for_round[i*4], players_for_round[i*4+1]
+                    p3, p4 = players_for_round[i*4+2], players_for_round[i*4+3]
+                    
+                    pair1 = frozenset([p1, p2])
+                    pair2 = frozenset([p3, p4])
+                    
+                    if pair1 in past_pairs: current_conflicts += 1
+                    if pair2 in past_pairs: current_conflicts += 1
+                    
+                    temp_pairs.append((p1, p2, p3, p4))
+                
+                # 충돌이 0이면 바로 채택하고 종료
+                if current_conflicts == 0:
+                    best_permutation = temp_pairs
+                    break
+                
+                # 충돌이 있더라도 기존보다 적으면 일단 후보로 저장
+                if current_conflicts < min_conflicts:
+                    min_conflicts = current_conflicts
+                    best_permutation = temp_pairs
+            
+            # 확정된 조합으로 매치 생성 및 파트너 이력 저장
+            for (p1, p2, p3, p4) in best_permutation:
+                matches.append({"t1": f"{p1}, {p2}", "t2": f"{p3}, {p4}"})
+                past_pairs.add(frozenset([p1, p2]))
+                past_pairs.add(frozenset([p3, p4]))
+
+        else:
+            # ⚖️ ELO밸런스 (기존 로직 유지 + 파트너 기록만 추가)
+            sorted_p = sorted(players_for_round, key=lambda x: stats.get(x, {}).get('point', 1000), reverse=True)
+            n = len(sorted_p)
+            for i in range(courts_num):
+                p1 = sorted_p[2 * i]
+                p2 = sorted_p[n - 1 - (2 * i)]
+                p3 = sorted_p[2 * i + 1]
+                p4 = sorted_p[n - 1 - (2 * i + 1)]
+                
+                matches.append({"t1": f"{p1}, {p2}", "t2": f"{p3}, {p4}"})
+                past_pairs.add(frozenset([p1, p2]))
+                past_pairs.add(frozenset([p3, p4]))
+                
+        schedule.append({"round_num": r + 1, "matches": matches})
+        for p in players_for_round: play_counts[p] += 1
+        
+    return schedule
+  
+
+
+# --- [신규 기능] 대진표 백업 및 복구 ---
+def save_schedule_backup(schedule_data):
+    """현재 생성된 대진표를 구글 시트 '백업_대진표' 탭에 저장"""
+    try:
+        ws = get_or_create_worksheet("백업_대진표", ["데이터"])
+        ws.clear()
+        # JSON 형태로 덤프하여 저장
+        json_str = json.dumps(schedule_data, ensure_ascii=False)
+        # 구글 시트 셀 용량 제한 고려하여 청크로 나눌 수도 있으나, 보통 텍스트 1개 셀에 들어감
+        ws.update_cell(1, 1, json_str) 
+        st.toast("✅ 대진표가 클라우드에 백업되었습니다.")
+    except Exception as e:
+        st.error(f"백업 실패: {e}")
+
+def load_schedule_backup():
+    """구글 시트에서 대진표 불러오기"""
+    try:
+        ws = spreadsheet.worksheet("백업_대진표")
+        json_str = ws.cell(1, 1).value
+        if json_str:
+            return json.loads(json_str)
+    except:
+        return None
+    return None
+
+
+
+
 
 def balance_teams_by_point(players, stats):
     sorted_p = sorted(players, key=lambda x: stats.get(x, {}).get('point', 1000), reverse=True)
@@ -210,66 +346,6 @@ def balance_teams_by_point(players, stats):
 import math
 import random
 
-def generate_league_schedule(attendees, target_games, mode, stats):
-    schedule = []
-    play_counts = {p: 0 for p in attendees}
-    courts_num = len(attendees) // 4
-    
-    # 코트가 0개면 생성 불가
-    if courts_num == 0: return []
-    
-    total_slots_needed = len(attendees) * target_games
-    slots_per_round = courts_num * 4
-    total_rounds = math.ceil(total_slots_needed / slots_per_round)
-    
-    for r in range(total_rounds):
-        # 1. 경기 수가 적은 순서대로 정렬 (동점일 경우 랜덤) -> 로테이션 구현
-        waiting_list = sorted(attendees, key=lambda x: (play_counts[x], random.random()))
-        
-        # 2. 이번 라운드 정원만큼 자르기 (예: 9명이면 상위 8명 선택)
-        players_for_round = waiting_list[:slots_per_round]
-        matches = []
-        
-        if mode == "🎲 랜덤 복식":
-            # 무작위로 섞은 뒤 앞에서부터 4명씩 끊어서 매칭
-            random.shuffle(players_for_round)
-            for i in range(courts_num):
-                base = i * 4
-                p1, p2 = players_for_round[base], players_for_round[base+1]
-                p3, p4 = players_for_round[base+2], players_for_round[base+3]
-                matches.append({"t1": f"{p1}, {p2}", "t2": f"{p3}, {p4}"})
-        else:
-            # ⚖️ ELO밸런스 (실력 기반 균등 매칭)
-            # 점수 높은 순으로 정렬
-            sorted_p = sorted(players_for_round, key=lambda x: stats.get(x, {}).get('point', 1000), reverse=True)
-            n = len(sorted_p)
-            
-            # [수정 핵심] 인덱스가 겹치지 않도록 '스네이크 방식' 변형 적용
-            # i=0 (1코트): (1등, 꼴등) vs (2등, 꼴등-1)
-            # i=1 (2코트): (3등, 꼴등-2) vs (4등, 꼴등-3)
-            for i in range(courts_num):
-                # High Ranker 인덱스 (0, 2, 4...)
-                h1_idx = 2 * i
-                h2_idx = 2 * i + 1
-                
-                # Low Ranker 인덱스 (뒤에서 0, 2, 4...)
-                l1_idx = n - 1 - (2 * i)
-                l2_idx = n - 1 - (2 * i + 1)
-                
-                # 팀 구성: (잘하는사람 + 못하는사람) 조합으로 밸런스 유지
-                p1 = sorted_p[h1_idx]
-                p2 = sorted_p[l1_idx]
-                p3 = sorted_p[h2_idx]
-                p4 = sorted_p[l2_idx]
-                
-                matches.append({"t1": f"{p1}, {p2}", "t2": f"{p3}, {p4}"})
-                
-        schedule.append({"round_num": r + 1, "matches": matches})
-        
-        # 이번 라운드 뛴 사람들 경기 수 증가
-        for p in players_for_round: play_counts[p] += 1
-        
-    return schedule
 
 
 def generate_kdk_schedule(players, rounds):
@@ -352,11 +428,32 @@ if is_admin:
     )
 
 
-# [0] 실시간 현황판 (누구나 접속 가능 + 관리자용 초기화 버튼)
+# [0] 실시간 현황판
 if menu == "📺 실시간 현황판":
     st.header("📺 LIVE SCOREBOARD")
     
-    # [NEW] 관리자 전용: 영업 종료 버튼
+    # --- 다크모드/라이트모드 선택 ---
+    c_mode1, c_mode2 = st.columns([0.8, 0.2])
+    with c_mode2:
+        view_mode = st.radio("화면 모드", ["🌞 라이트", "🌙 다크"], label_visibility="collapsed")
+    
+    # CSS 스타일 변수 설정
+    if view_mode == "🌙 다크":
+        bg_color = "#1E1E1E" # 짙은 회색 배경
+        text_color = "#FFFFFF"
+        card_bg = "#2D2D2D" # 카드 배경
+        t1_color = "#4DD0E1" # 밝은 하늘색 (다크모드용)
+        t2_color = "#FF8A65" # 밝은 주황색 (다크모드용)
+        vs_color = "#BDBDBD"
+    else:
+        bg_color = "#FFFFFF"
+        text_color = "#000000"
+        card_bg = "#F0F2F6"
+        t1_color = "blue"
+        t2_color = "red"
+        vs_color = "black"
+
+    # [NEW] 관리자 전용 기능 (기존과 동일)
     if is_admin:
         col_adm1, col_adm2 = st.columns([1, 1])
         with col_adm1:
@@ -364,8 +461,8 @@ if menu == "📺 실시간 현황판":
                 try:
                     ws = spreadsheet.worksheet("실시간현황")
                     ws.clear()
-                    ws.append_row(["라운드", "코트", "팀1", "팀2", "업데이트시간"]) # 헤더만 남김
-                    st.toast("현황판을 초기화했습니다. (영업 종료)", icon="👋")
+                    ws.append_row(["라운드", "코트", "팀1", "팀2", "업데이트시간"])
+                    st.toast("초기화 완료", icon="👋")
                     st.rerun()
                 except Exception as e:
                     st.error(f"초기화 실패: {e}")
@@ -374,30 +471,50 @@ if menu == "📺 실시간 현황판":
                 st.cache_data.clear()
                 st.rerun()
     else:
-        # 일반 회원은 새로고침 버튼만
         if st.button("🔄 새로고침", use_container_width=True):
             st.cache_data.clear()
             st.rerun()
         
     live_df = load_live_status()
     
-    # 데이터가 있고, 내용이 비어있지 않은 경우에만 표시
     if not live_df.empty and len(live_df) > 0 and live_df.iloc[0]['팀1'] != "": 
         last_update = live_df['업데이트시간'].iloc[0] if '업데이트시간' in live_df.columns else "?"
         st.caption(f"🕒 Update: {last_update}")
         rounds = live_df['라운드'].unique()
+        
         for r in rounds:
-            st.subheader(f"📌 {r}")
+            st.markdown(f"### 📌 {r}")
             r_data = live_df[live_df['라운드'] == r]
             for _, row in r_data.iterrows():
-                with st.container(border=True):
-                    col1, col2, col3 = st.columns([1, 0.2, 1])
-                    with col1: st.markdown(f"<div style='text-align:center; color:blue; font-weight:bold;'>{row['팀1']}</div>", unsafe_allow_html=True)
-                    with col2: st.markdown(f"<div style='text-align:center;'>VS</div>", unsafe_allow_html=True)
-                    with col3: st.markdown(f"<div style='text-align:center; color:red; font-weight:bold;'>{row['팀2']}</div>", unsafe_allow_html=True)
-                    st.markdown(f"<div style='text-align:center; font-size:0.8em; color:gray;'>🏟️ {row['코트']}</div>", unsafe_allow_html=True)
+                # 다크모드를 위해 st.container 대신 HTML/CSS로 직접 디자인
+                html_card = f"""
+                <div style="
+                    background-color: {card_bg};
+                    padding: 15px;
+                    border-radius: 10px;
+                    margin-bottom: 10px;
+                    box-shadow: 2px 2px 5px rgba(0,0,0,0.1);
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                ">
+                    <div style="flex:1; text-align:center; color:{t1_color}; font-weight:bold; font-size:1.1em;">
+                        {row['팀1']}
+                    </div>
+                    <div style="flex:0.2; text-align:center; color:{vs_color}; font-weight:bold;">
+                        VS
+                    </div>
+                    <div style="flex:1; text-align:center; color:{t2_color}; font-weight:bold; font-size:1.1em;">
+                        {row['팀2']}
+                    </div>
+                </div>
+                <div style="text-align:center; font-size:0.85em; color:gray; margin-top:-5px; margin-bottom:15px;">
+                    🏟️ {row['코트']}
+                </div>
+                """
+                st.markdown(html_card, unsafe_allow_html=True)
     else:
-        st.info("현재 진행 중인 경기가 없습니다. (일정 종료)")
+        st.info("현재 진행 중인 경기가 없습니다.")
         st.caption("운영자가 대진표를 공유하면 여기에 표시됩니다.")
 
 
@@ -465,25 +582,53 @@ elif menu == "🏟️ 경기 운영":
     mode_tab1, mode_tab2, mode_tab3, mode_tab4 = st.tabs(["🔄 일반 매칭", "🏆 토너먼트", "⚔️ 팀 대항전", "🔢 KDK(개인전)"])
     member_df = load_data("회원정보", ["이름"])
     
-    # 2.1 일반 매칭
+        # 2.1 일반 매칭
     with mode_tab1:
         if not member_df.empty:
+            # ----------------------------------------------------
+            # [복구 버튼] 실수로 껐을 때 대진표 불러오기
+            # ----------------------------------------------------
+            if st.button("📂 지난 대진표 불러오기 (세션 복구)", help="앱이 꺼져서 대진표가 사라졌을 때 사용하세요"):
+                saved_schedule = load_schedule_backup()
+                if saved_schedule:
+                    st.session_state.schedule = saved_schedule
+                    st.session_state.is_generated = True
+                    st.session_state.recorded_ids = set() 
+                    # 이미 기록된 ID들을 DB에서 확인해서 recorded_ids 복구 (선택 사항, 여기선 간단히 처리)
+                    # 실제로는 DB를 조회해서 이미 완료된 경기는 버튼을 비활성화 해야 완벽함
+                    hist = load_data("경기기록", ["경기ID"])
+                    if not hist.empty:
+                         # 저장할 때 ID생성 로직이 없어서 단순 매칭으론 복구 어려움. 
+                         # 따라서 불러오기만 하고 중복 입력 주의 문구 띄움
+                         st.toast("대진표를 복구했습니다! 이미 입력한 경기는 다시 입력하지 마세요.")
+                    st.success("대진표 복구 완료!")
+                else:
+                    st.error("저장된 대진표가 없습니다.")
+            
+            st.divider()
+            
             attendees = st.multiselect("출석 체크", member_df["이름"].tolist(), key="league_att")
             c1, c2 = st.columns(2)
             with c1: target_games = st.slider("인당 게임 수", 1, 6, 3)
-            with c2: match_mode = st.radio("방식", ["🎲 랜덤", "⚖️ ELO밸런스"], horizontal=True, key="league_mode")
+            with c2: match_mode = st.radio("방식", ["🎲 랜덤 복식", "⚖️ ELO밸런스"], horizontal=True, key="league_mode") # 이름 "🎲 랜덤 복식"으로 정확히 맞춤
             
-            # 생성 버튼 (누구나 눌러볼 수는 있게 함, 저장은 관리자)
+            # 생성 버튼
             if st.button("🚀 대진표 생성", type="primary"):
-                hist = load_data("경기기록", ["날짜", "경기ID", "팀1", "팀2", "점수1", "점수2", "승리팀"])
+                hist = load_data("경기기록", ["경기ID", "날짜", "팀1", "팀2", "승리팀"]) # ID 포함 로드
                 stats = get_player_stats_and_elo(hist, member_df["이름"].tolist())
-                st.session_state.schedule = generate_league_schedule(attendees, target_games, match_mode, stats)
+                
+                # 스케줄 생성
+                new_schedule = generate_league_schedule(attendees, target_games, match_mode, stats)
+                
+                st.session_state.schedule = new_schedule
                 st.session_state.is_generated = True
-                st.session_state.recorded_ids = set() # [NEW] 기록된 매치 추적용
+                st.session_state.recorded_ids = set()
+                
+                # [자동 백업] 생성되자마자 구글 시트에 저장
+                save_schedule_backup(new_schedule)
 
             if st.session_state.get('is_generated'):
                 st.divider()
-                # [공유 기능] 관리자만 가능
                 if is_admin:
                     if st.button("📢 실시간 중계하기 (일반)", use_container_width=True):
                         display_data = []
@@ -499,7 +644,6 @@ elif menu == "🏟️ 경기 운영":
                         with st.container(border=True):
                             c1, c2, c3 = st.columns([2,1,1])
                             c1.caption(f"{match['t1']} vs {match['t2']}")
-                            # [NEW] max_value 제거
                             s1 = c2.number_input("점1", key=f"r{r_num}m{idx}s1", min_value=0) 
                             s2 = c3.number_input("점2", key=f"r{r_num}m{idx}s2", min_value=0)
                             
@@ -507,7 +651,6 @@ elif menu == "🏟️ 경기 운영":
                             is_done = unique_key in st.session_state.get('recorded_ids', set())
                             
                             if is_admin:
-                                # [NEW] disabled 속성 추가
                                 if st.button("기록" if not is_done else "완료됨", key=unique_key, disabled=is_done):
                                     add_match_record(match['t1'], match['t2'], s1, s2)
                                     st.session_state.recorded_ids.add(unique_key)
@@ -515,6 +658,7 @@ elif menu == "🏟️ 경기 운영":
                                     st.rerun()
                             elif not is_admin and not is_done:
                                 st.caption("🔒 기록 권한 없음")
+
 
     # 2.2 토너먼트
     with mode_tab2:
