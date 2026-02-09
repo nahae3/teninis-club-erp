@@ -170,58 +170,72 @@ def get_player_stats_and_elo(df, all_members=None):
     stats = {}
     if all_members:
         for p in all_members:
+            # [수정] 무승부(draw) 카운트 명시
             stats[p] = {"point": 1000, "승": 0, "패": 0, "무": 0, "경기": 0}
-            
+
     if df.empty: return stats
 
-    # [수정 핵심] 경기ID가 같다면 중복된 데이터로 보고 제거 (가장 마지막 기록 유지)
+    # 중복 데이터 제거 (경기ID 기준)
     if '경기ID' in df.columns:
         df = df.drop_duplicates(subset=['경기ID'], keep='last')
-
+        
     if '날짜' in df.columns: df = df.sort_values("날짜")
 
     for _, row in df.iterrows():
         try:
-            # 팀원 이름 분리
+            # 1. 팀원 이름 분리
             p1, p2 = [p.strip() for p in str(row['팀1']).split(',')]
             p3, p4 = [p.strip() for p in str(row['팀2']).split(',')]
-            winner = row['승리팀']
             
-            # 선수 통계 초기화
+            # 선수 통계 딕셔너리에 없으면 초기화
             for p in [p1, p2, p3, p4]:
                 if p not in stats: stats[p] = {"point": 1000, "승": 0, "패": 0, "무": 0, "경기": 0}
-            
+
+            # 2. [핵심 수정] 텍스트가 아닌 '점수'로 승패 판단
+            try:
+                s1 = int(row['점수1'])
+                s2 = int(row['점수2'])
+            except:
+                continue # 점수가 숫자가 아니면 패스
+
             # 경기 수 증가
             for p in [p1, p2, p3, p4]: stats[p]["경기"] += 1
-            
-            # 무승부 처리
-            if winner == "무승부":
-                for p in [p1, p2, p3, p4]: stats[p]["무"] += 1
-                continue 
 
-            is_team1_win = (winner == row['팀1'])
-            
-            # 승패 기록
-            if is_team1_win:
+            # 3. 승무패 로직 분기
+            if s1 == s2:
+                # --- 무승부 (Draw) ---
+                for p in [p1, p2, p3, p4]: stats[p]["무"] += 1
+                actual_score = 0.5 # Elo 공식에서 무승부는 0.5로 계산
+                
+                # 승패 카운트는 올리지 않음
+                
+            elif s1 > s2:
+                # --- 팀1 승리 ---
                 for p in [p1, p2]: stats[p]["승"] += 1
                 for p in [p3, p4]: stats[p]["패"] += 1
+                actual_score = 1.0
+                
             else:
+                # --- 팀2 승리 ---
                 for p in [p1, p2]: stats[p]["패"] += 1
                 for p in [p3, p4]: stats[p]["승"] += 1
-            
-            # Elo 계산
+                actual_score = 0.0
+
+            # 4. Elo 점수 계산 (무승부도 반영됨)
             team1_avg = (stats[p1]["point"] + stats[p2]["point"]) / 2
             team2_avg = (stats[p3]["point"] + stats[p4]["point"]) / 2
-            actual_score = 1 if is_team1_win else 0
+            
             change = calculate_elo_change(team1_avg, team2_avg, actual_score)
             
+            # 무승부일 경우 change 값이 작게 나오지만, 강팀과 비기면 약팀 점수가 오름
             for p in [p1, p2]: stats[p]["point"] += round(change)
             for p in [p3, p4]: stats[p]["point"] -= round(change)
-            
-        except Exception: 
+
+        except Exception:
             continue
             
     return stats
+
 
 # --- [수정된 함수 2] 리그 스케줄 생성 (중복 파트너 방지 로직 추가) ---
 def generate_league_schedule(attendees, target_games, mode, stats):
@@ -235,75 +249,102 @@ def generate_league_schedule(attendees, target_games, mode, stats):
     slots_per_round = courts_num * 4
     total_rounds = math.ceil(total_slots_needed / slots_per_round)
     
-    # [수정 핵심] 역대 파트너 기록 저장 (순서 상관없는 집합으로 저장)
+    # [핵심] 역대 파트너 기록 저장소 (순서 없는 집합)
     past_pairs = set()
 
     for r in range(total_rounds):
-        # 경기 수가 적은 순서대로 정렬 (동점일 경우 랜덤)
+        # 1. 경기 수가 적은 순서대로 정렬 (동점일 경우 랜덤 섞기)
         waiting_list = sorted(attendees, key=lambda x: (play_counts[x], random.random()))
         players_for_round = waiting_list[:slots_per_round]
         
         matches = []
         
+        # --- [모드 1] 랜덤 복식 (기존 업데이트 유지) ---
         if mode == "🎲 랜덤 복식":
-            # [수정 핵심] 중복 파트너 방지를 위한 재시도 로직
             best_permutation = None
             min_conflicts = 999
             
-            # 최대 50번 섞어보면서 중복 파트너가 없는 조합을 찾음
+            # 50번 셔플해보며 가장 중복이 적은 조합 찾기
             for _ in range(50):
                 random.shuffle(players_for_round)
                 current_conflicts = 0
                 temp_pairs = []
                 
-                # 가상의 팀을 짜보고 중복 검사
                 for i in range(courts_num):
                     p1, p2 = players_for_round[i*4], players_for_round[i*4+1]
                     p3, p4 = players_for_round[i*4+2], players_for_round[i*4+3]
                     
-                    pair1 = frozenset([p1, p2])
-                    pair2 = frozenset([p3, p4])
-                    
-                    if pair1 in past_pairs: current_conflicts += 1
-                    if pair2 in past_pairs: current_conflicts += 1
-                    
+                    if frozenset([p1, p2]) in past_pairs: current_conflicts += 1
+                    if frozenset([p3, p4]) in past_pairs: current_conflicts += 1
                     temp_pairs.append((p1, p2, p3, p4))
                 
-                # 충돌이 0이면 바로 채택하고 종료
                 if current_conflicts == 0:
                     best_permutation = temp_pairs
                     break
-                
-                # 충돌이 있더라도 기존보다 적으면 일단 후보로 저장
                 if current_conflicts < min_conflicts:
                     min_conflicts = current_conflicts
                     best_permutation = temp_pairs
             
-            # 확정된 조합으로 매치 생성 및 파트너 이력 저장
             for (p1, p2, p3, p4) in best_permutation:
                 matches.append({"t1": f"{p1}, {p2}", "t2": f"{p3}, {p4}"})
                 past_pairs.add(frozenset([p1, p2]))
                 past_pairs.add(frozenset([p3, p4]))
 
+        # --- [모드 2] ELO 밸런스 (여기가 수정됨!) ---
         else:
-            # ⚖️ ELO밸런스 (기존 로직 유지 + 파트너 기록만 추가)
+            # 점수 높은 순 정렬
             sorted_p = sorted(players_for_round, key=lambda x: stats.get(x, {}).get('point', 1000), reverse=True)
-            n = len(sorted_p)
+            
+            # 코트별로 4명씩 끊어서 최적 조합 찾기
             for i in range(courts_num):
-                p1 = sorted_p[2 * i]
-                p2 = sorted_p[n - 1 - (2 * i)]
-                p3 = sorted_p[2 * i + 1]
-                p4 = sorted_p[n - 1 - (2 * i + 1)]
+                # 해당 코트에 배정된 4명 (점수순: 1위, 2위, 3위, 4위)
+                # 스네이크 방식이 아니라, 그룹핑 후 내부 조합 변경 방식으로 변경
+                # 예: 1코트(1,2,3,4등), 2코트(5,6,7,8등) ... 이렇게 하면 실력차가 너무 나므로
+                # 기존처럼 스네이크로 4명을 뽑되, 그 4명 안에서 파트너만 바꿉니다.
                 
-                matches.append({"t1": f"{p1}, {p2}", "t2": f"{p3}, {p4}"})
-                past_pairs.add(frozenset([p1, p2]))
-                past_pairs.add(frozenset([p3, p4]))
+                # 그룹 추출 (High 2명 + Low 2명)
+                # i=0 -> 1,2등 & 뒤에서 1,2등
+                h1, h2 = sorted_p[2*i], sorted_p[2*i+1]
+                l1, l2 = sorted_p[-(2*i+1)], sorted_p[-(2*i+2)]
+                
+                group = [h1, h2, l1, l2]
+                
+                # 이 4명으로 만들 수 있는 3가지 파트너 조합
+                # Option A (정석): (h1, l2) vs (h2, l1) -> 1등+꼴등
+                # Option B (변형): (h1, l1) vs (h2, l2) -> 1등+꼴등앞
+                # Option C (비추): (h1, h2) vs (l1, l2) -> 잘함vs못함 (밸런스 붕괴)
+                
+                # Option A 검사
+                pair_a1 = frozenset([h1, l2])
+                pair_a2 = frozenset([h2, l1])
+                conflict_a = (pair_a1 in past_pairs) or (pair_a2 in past_pairs)
+                
+                # Option B 검사
+                pair_b1 = frozenset([h1, l1])
+                pair_b2 = frozenset([h2, l2])
+                conflict_b = (pair_b1 in past_pairs) or (pair_b2 in past_pairs)
+                
+                # 결정 로직: A가 안 겹치면 A, 겹치면 B, 둘 다 겹치면 그냥 A(어쩔 수 없음)
+                if not conflict_a:
+                    final_p1, final_p2 = h1, l2
+                    final_p3, final_p4 = h2, l1
+                elif not conflict_b:
+                    final_p1, final_p2 = h1, l1
+                    final_p3, final_p4 = h2, l2
+                else:
+                    # 둘 다 해봤던 조합이면... 그냥 랜덤으로 섞거나 A로 회귀
+                    final_p1, final_p2 = h1, l2
+                    final_p3, final_p4 = h2, l1
+
+                matches.append({"t1": f"{final_p1}, {final_p2}", "t2": f"{final_p3}, {final_p4}"})
+                past_pairs.add(frozenset([final_p1, final_p2]))
+                past_pairs.add(frozenset([final_p3, final_p4]))
                 
         schedule.append({"round_num": r + 1, "matches": matches})
         for p in players_for_round: play_counts[p] += 1
         
     return schedule
-  
+
 
 
 # --- [신규 기능] 대진표 백업 및 복구 ---
@@ -864,24 +905,37 @@ elif menu == "🏟️ 경기 운영":
 
             st.divider()
 
-            # [Step 3] 대진표 생성 및 시작
+                   # [Step 3] 대진표 생성 및 시작 (수정됨)
             if st.button("🚀 대진표 촤라락 생성 & 경기 시작", type="primary", use_container_width=True, key="btn_start_battle"):
                 if not new_a or not new_b:
                     st.error("팀원이 배정되지 않았습니다.")
                 else:
                     import itertools
+                    
+                    # 1. 각 팀에서 가능한 모든 복식 조합 생성 (예: 4명이면 6개 조합)
                     pairs_a = list(itertools.combinations(new_a, 2))
                     pairs_b = list(itertools.combinations(new_b, 2))
                     
-                    if not pairs_a: pairs_a = [(m, m) for m in new_a]
-                    if not pairs_b: pairs_b = [(m, m) for m in new_b]
+                    # 예외처리: 팀원이 1명이면 (나, 나)로 처리
+                    if not pairs_a: pairs_a = [(new_a[0], new_a[0])]
+                    if not pairs_b: pairs_b = [(new_b[0], new_b[0])]
+                    
+                    # 2. 조합을 무작위로 섞음 (순서 섞기)
+                    random.shuffle(pairs_a)
+                    random.shuffle(pairs_b)
                     
                     matches = []
+                    
+                    # 3. 경기 수만큼 조합을 꺼내서 매칭 (카드 덱에서 뽑듯이)
                     for i in range(game_count):
-                        p1 = random.choice(pairs_a)
-                        p2 = random.choice(pairs_b)
-                        t1_str = f"{p1[0]}, {p1[1]}" if p1[0] != p1[1] else p1[0]
-                        t2_str = f"{p2[0]}, {p2[1]}" if p2[0] != p2[1] else p2[0]
+                        # % 연산자를 사용하여 조합 수보다 경기 수가 많으면 다시 처음부터 순환
+                        # 예: 조합이 6개인데 경기가 7개면, 7번째 경기는 첫 번째 조합이 다시 나옴
+                        p1 = pairs_a[i % len(pairs_a)]
+                        p2 = pairs_b[i % len(pairs_b)]
+                        
+                        t1_str = f"{p1[0]}, {p1[1]}"
+                        t2_str = f"{p2[0]}, {p2[1]}"
+                        
                         matches.append({
                             "round": i+1, 
                             "t1": t1_str, 
@@ -893,7 +947,9 @@ elif menu == "🏟️ 경기 운영":
                     
                     st.session_state.battle_matches = matches
                     st.session_state.battle_active = True
+                    st.toast("✅ 중복 없는 최적의 대진표가 생성되었습니다!")
                     st.rerun()
+
 
             # [Step 4] 경기 진행
             if st.session_state.battle_active:
@@ -1054,27 +1110,34 @@ elif menu == "📊 랭킹 & 분석":
         # 통계 계산
         stats = get_player_stats_and_elo(df, member_df["이름"].tolist())
         
+          # (앞부분 생략)... stats 계산 후 ...
+        
         rank_data = []
         for p, d in stats.items():
-            if d['경기'] > 0: # 경기가 있는 사람만 표시
+            if d['경기'] > 0:
+                # 승률 계산 (무승부는 경기수에는 포함되지만 승수에는 포함 안 됨 -> 승률 하락 요인)
+                # 만약 무승부를 승률 계산에서 빼고 싶다면 분모를 (d['경기'] - d['무'])로 하시면 됩니다.
+                # 여기선 표준 방식(전체 경기 수 대비 승리)을 따릅니다.
                 win_rate = (d['승'] / d['경기']) * 100
                 rank_data.append({
                     "이름": p, 
                     "포인트": d['point'], 
-                    "승률": f"{win_rate:.1f}%", # % 문자열로 변환
+                    "승률": f"{win_rate:.1f}%", 
                     "승": d['승'], 
+                    "무": d['무'],  # [추가]
                     "패": d['패'], 
                     "전": d['경기']
                 })
         
-        # 랭킹 데이터프레임 생성
         rank_df = pd.DataFrame(rank_data).sort_values("포인트", ascending=False)
         rank_df = rank_df.reset_index(drop=True)
         rank_df.index = rank_df.index + 1 
         
-        # 최댓값 계산 (그래프 비율용)
         max_score = rank_df['포인트'].max() if not rank_df.empty else 1200
-        min_score = 800 # 그래프 최소치 설정 (시각적 효과 위해)
+        min_score = 800
+
+
+        )
 
         # -------------------------------------------------------
         # [수정] 랭킹 테이블 (data_color 옵션 제거하여 오류 해결)
@@ -1082,25 +1145,25 @@ elif menu == "📊 랭킹 & 분석":
         # -------------------------------------------------------
         # [수정] 랭킹 테이블 (Numpy 타입을 int로 강제 변환하여 JSON 오류 해결)
         # -------------------------------------------------------
+        # [수정] 데이터프레임 컬럼 설정에 '무' 추가
         st.dataframe(
             rank_df,
             column_config={
                 "이름": st.column_config.TextColumn("이름", width="medium"),
                 "포인트": st.column_config.ProgressColumn(
                     "포인트 (Elo)",
-                    help="Elo 랭킹 포인트",
                     format="%d pts",
-                    # ★ 여기가 핵심 수정 포인트입니다! int()로 감싸줍니다. ★
                     min_value=int(min_score),  
                     max_value=int(max_score) + 100, 
                 ),
                 "승률": st.column_config.TextColumn("승률"),
                 "승": st.column_config.NumberColumn("승"),
+                "무": st.column_config.NumberColumn("무"), # [NEW]
                 "패": st.column_config.NumberColumn("패"),
                 "전": st.column_config.NumberColumn("전"),
             },
-            use_container_width=True
-        )
+            use_container_width=True     
+         )
 
 
         st.divider()
