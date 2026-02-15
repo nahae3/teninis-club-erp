@@ -1139,7 +1139,8 @@ elif menu == "🏟️ 경기 운영":
                             p1, p2, p3, p4 = [remaining_members.pop(0) for _ in range(4)]
                             current_matches.append({"t1": f"{p1}, {p2}", "t2": f"{p3}, {p4}", "court": f"추가코트"})
                         
-                        new_boss_schedule.append({"game_num": g, "matches": current_matches})
+                        # [KEY FIX] 'game' 키 사용 (이전 데이터 호환)
+                        new_boss_schedule.append({"game": g, "matches": current_matches})
                         # 매 게임마다 인원 초기화 (다음 게임 랜덤을 위해)
                         remaining_members = [m for m in boss_attendees if m not in fixed_members]
 
@@ -1149,7 +1150,8 @@ elif menu == "🏟️ 경기 운영":
                         # 회장이 직접 선택할 수 있도록 빈 팀 구조만 생성
                         courts_needed = len(boss_attendees) // 4
                         current_matches = [{"t1": "미지정", "t2": "미지정", "court": f"{i+1}코트"} for i in range(courts_needed)]
-                        new_boss_schedule.append({"game_num": g, "matches": current_matches})
+                        # [KEY FIX] 'game' 키 사용
+                        new_boss_schedule.append({"game": g, "matches": current_matches})
 
                 st.session_state.boss_schedule = new_boss_schedule
                 st.session_state.boss_active = True
@@ -1163,12 +1165,16 @@ elif menu == "🏟️ 경기 운영":
                 if st.button("📢 실시간 현황판 전송 (회장맘대로)", use_container_width=True):
                     live_data = []
                     for gs in st.session_state.boss_schedule:
+                        # [KEY FIX] 'game' 키 사용 확인
+                        game_num = gs.get('game', gs.get('game_num', '?'))
                         for m in gs['matches']:
-                            live_data.append({"round": f"Game {gs['game_num']}", "court": m['court'], "t1": m['t1'], "t2": m['t2']})
+                            live_data.append({"round": f"Game {game_num}", "court": m['court'], "t1": m['t1'], "t2": m['t2']})
                     share_to_live_board(live_data)
 
             for g_idx, game_data in enumerate(st.session_state.boss_schedule):
-                st.markdown(f"### 🏟️ Game {game_data['game_num']}")
+                # [KEY FIX] 'game' 키 사용
+                game_num = game_data.get('game', game_data.get('game_num', g_idx+1))
+                st.markdown(f"### 🏟️ Game {game_num}")
                 for m_idx, match in enumerate(game_data['matches']):
                     with st.container(border=True):
                         c1, c2, c3 = st.columns([3, 1, 1])
