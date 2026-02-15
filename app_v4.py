@@ -624,12 +624,11 @@ elif menu == "🏟️ 경기 운영":
     # --- [신규 추가] '회장맘대로' 전용 탭 레이아웃 및 로직 ---
 
 # 경기 운영 부분의 tabs 정의 수정
-mode_tab1, mode_tab2, mode_tab3, mode_tab4, mode_tab5 = st.tabs([
-    "🔄 일반 매칭", "🏆 토너먼트", "⚔️ 팀 대항전", "🔢 KDK(개인전)", "👑 회장맘대로"
-])
-
- # 2.1 일반 매칭
-    with mode_tab1:
+mode_tab1, mode_tab2, mode_tab3, mode_tab4, mode_tab5 = st.tabs(["🔄 일반 매칭", "🏆 토너먼트", "⚔️ 팀 대항전", "🔢 KDK(개인전)", "👑 회장맘대로"])
+member_df = load_data("회원정보", ["이름"])
+ 
+# 2.1 일반 매칭
+with mode_tab1:
         if not member_df.empty:
             # ----------------------------------------------------
             # [복구 버튼] 실수로 껐을 때 대진표 불러오기
