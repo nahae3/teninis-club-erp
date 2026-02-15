@@ -11,7 +11,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 import json
 
 # --- 설정 및 한글 폰트 ---
-st.set_page_config(page_title="Sunday Smashers V6.3", page_icon="🎾", layout="wide")
+st.set_page_config(page_title="Sunday Smashers V7", page_icon="🎾", layout="wide")
 
 # [폰트 설정]
 try:
@@ -446,7 +446,7 @@ def draw_bracket_plot(teams_4):
     return fig
 
 # --- UI 시작 ---
-st.title("🎾 Sunday Smashers V6.3")
+st.title("🎾 Sunday Smashers V7")
 
 # 인증 확인 (관리자 모드 활성화 여부)
 is_admin = check_admin()
@@ -621,7 +621,7 @@ elif menu == "👥 회원 관리":
 # [2] 경기 운영
 elif menu == "🏟️ 경기 운영":
     st.header("🏟️ 경기 운영 시스템")
-    mode_tab1, mode_tab2, mode_tab3, mode_tab4 = st.tabs(["🔄 일반 매칭", "🏆 토너먼트", "⚔️ 팀 대항전", "🔢 KDK(개인전)","👑 회장맘대로"])
+    mode_tab1, mode_tab2, mode_tab3, mode_tab4, mode_tab5 = st.tabs(["🔄 일반 매칭", "🏆 토너먼트", "⚔️ 팀 대항전", "🔢 KDK(개인전)","👑 회장맘대로"])
     member_df = load_data("회원정보", ["이름"])
     
         # 2.1 일반 매칭
