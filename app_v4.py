@@ -621,7 +621,7 @@ elif menu == "👥 회원 관리":
 # [2] 경기 운영
 elif menu == "🏟️ 경기 운영":
     st.header("🏟️ 경기 운영 시스템")
-    mode_tab1, mode_tab2, mode_tab3, mode_tab4 = st.tabs(["🔄 일반 매칭", "🏆 토너먼트", "⚔️ 팀 대항전", "🔢 KDK(개인전)"])
+    mode_tab1, mode_tab2, mode_tab3, mode_tab4 = st.tabs(["🔄 일반 매칭", "🏆 토너먼트", "⚔️ 팀 대항전", "🔢 KDK(개인전)","👑 회장맘대로"])
     member_df = load_data("회원정보", ["이름"])
     
         # 2.1 일반 매칭
@@ -1069,6 +1069,137 @@ elif menu == "🏟️ 경기 운영":
                                         st.rerun()
                                 else:
                                     st.success(f"{scores[key]['s1']} : {scores[key]['s2']}")
+
+    # --- [신규 추가] '회장맘대로' 전용 탭 레이아웃 및 로직 ---
+
+
+# 2.5 회장맘대로 (신규 기능)
+with mode_tab5:
+    st.subheader("👑 회장님 전용 맞춤 매칭")
+    
+    # [1] 복구 및 기본 설정
+    col_back1, col_back2 = st.columns([2, 1])
+    with col_back1:
+        if st.button("📂 회장님 대진표 불러오기 (복구)", key="restore_boss"):
+            saved = load_schedule_backup()
+            if saved:
+                st.session_state.boss_schedule = saved
+                st.session_state.boss_active = True
+                st.success("대진표 복구 완료!")
+    
+    st.divider()
+
+    # [2] 출석체크 및 환경 설정
+    boss_attendees = st.multiselect("출석 체크 (회장님 확인)", member_df["이름"].tolist(), key="boss_att")
+    
+    c1, c2 = st.columns(2)
+    with c1:
+        boss_game_count = st.slider("진행할 게임 수", 3, 10, 4, key="boss_game_cnt")
+    with c2:
+        boss_mode = st.radio("매칭 방식 선택", ["고정 팀(나머지 랜덤)", "완전 수동(회장 지정)"], key="boss_mode_opt")
+
+    # [3] 세부 설정 (고정 팀 모드일 경우)
+    fixed_teams = []
+    if boss_mode == "고정 팀(나머지 랜덤)":
+        with st.expander("📌 고정 팀 설정 (최대 4팀)", expanded=True):
+            st.caption("고정하고 싶은 팀원을 선택하세요. 나머지는 랜덤으로 섞입니다.")
+            for i in range(1, 5):
+                t_cols = st.columns(2)
+                p1 = t_cols[0].selectbox(f"{i}코트 팀원1", ["선택안함"] + boss_attendees, key=f"fixed_t{i}_p1")
+                p2 = t_cols[1].selectbox(f"{i}코트 팀원2", ["선택안함"] + boss_attendees, key=f"fixed_t{i}_p2")
+                if p1 != "선택안함" and p2 != "선택안함":
+                    fixed_teams.append(f"{p1}, {p2}")
+
+    # [4] 대진표 생성 로직
+    if st.button("🚀 회장님 결재 대진표 생성", type="primary", use_container_width=True):
+        if len(boss_attendees) < 4:
+            st.error("최소 4명 이상의 출석 인원이 필요합니다.")
+        else:
+            new_boss_schedule = []
+            
+            # --- 방식 1: 고정 팀 나머지 랜덤 ---
+            if boss_mode == "고정 팀(나머지 랜덤)":
+                # 고정 팀에 포함된 인원 제외
+                fixed_members = []
+                for ft in fixed_teams:
+                    fixed_members.extend([p.strip() for p in ft.split(',')])
+                
+                remaining_members = [m for m in boss_attendees if m not in fixed_members]
+                
+                for g in range(1, boss_game_count + 1):
+                    current_matches = []
+                    # 1. 고정 팀 먼저 배치
+                    for i, ft in enumerate(fixed_teams):
+                        # 상대팀은 남은 인원에서 랜덤 추출 (간소화된 로직)
+                        if len(remaining_members) >= 2:
+                            random.shuffle(remaining_members)
+                            opp = f"{remaining_members.pop(0)}, {remaining_members.pop(0)}"
+                            current_matches.append({"t1": ft, "t2": opp, "court": f"{i+1}코트"})
+                    
+                    # 2. 남은 인원들끼리 매칭
+                    random.shuffle(remaining_members)
+                    while len(remaining_members) >= 4:
+                        p1, p2, p3, p4 = [remaining_members.pop(0) for _ in range(4)]
+                        current_matches.append({"t1": f"{p1}, {p2}", "t2": f"{p3}, {p4}", "court": f"추가코트"})
+                    
+                    new_boss_schedule.append({"game_num": g, "matches": current_matches})
+                    # 매 게임마다 인원 초기화 (다음 게임 랜덤을 위해)
+                    remaining_members = [m for m in boss_attendees if m not in fixed_members]
+
+            # --- 방식 2: 완전 수동 (빈 틀 생성) ---
+            else:
+                for g in range(1, boss_game_count + 1):
+                    # 회장이 직접 선택할 수 있도록 빈 팀 구조만 생성
+                    courts_needed = len(boss_attendees) // 4
+                    current_matches = [{"t1": "미지정", "t2": "미지정", "court": f"{i+1}코트"} for i in range(courts_needed)]
+                    new_boss_schedule.append({"game_num": g, "matches": current_matches})
+
+            st.session_state.boss_schedule = new_boss_schedule
+            st.session_state.boss_active = True
+            save_schedule_backup(new_boss_schedule)
+            st.rerun()
+
+    # [5] 대진표 표시 및 기록
+    if st.session_state.get('boss_active'):
+        st.divider()
+        if is_admin:
+            if st.button("📢 실시간 현황판 전송 (회장맘대로)", use_container_width=True):
+                live_data = []
+                for gs in st.session_state.boss_schedule:
+                    for m in gs['matches']:
+                        live_data.append({"round": f"Game {gs['game_num']}", "court": m['court'], "t1": m['t1'], "t2": m['t2']})
+                share_to_live_board(live_data)
+
+        for g_idx, game_data in enumerate(st.session_state.boss_schedule):
+            st.markdown(f"### 🏟️ Game {game_data['game_num']}")
+            for m_idx, match in enumerate(game_data['matches']):
+                with st.container(border=True):
+                    c1, c2, c3 = st.columns([3, 1, 1])
+                    
+                    # 수동 모드일 경우 선수 선택 드롭다운 표시
+                    if boss_mode == "완전 수동(회장 지정)":
+                        t1_p = c1.multiselect(f"팀1 (Game{g_idx+1}-M{m_idx+1})", boss_attendees, max_selections=2, key=f"b_t1_{g_idx}_{m_idx}")
+                        t2_p = c1.multiselect(f"팀2 (Game{g_idx+1}-M{m_idx+1})", boss_attendees, max_selections=2, key=f"b_t2_{g_idx}_{m_idx}")
+                        match['t1'] = ", ".join(t1_p) if t1_p else "미지정"
+                        match['t2'] = ", ".join(t2_p) if t2_p else "미지정"
+                    else:
+                        c1.write(f"**{match['court']}**: {match['t1']}  **VS** {match['t2']}")
+                    
+                    s1 = c2.number_input("점1", key=f"b_s1_{g_idx}_{m_idx}", min_value=0)
+                    s2 = c3.number_input("점2", key=f"b_s2_{g_idx}_{m_idx}", min_value=0)
+                    
+                    if is_admin:
+                        btn_key = f"btn_b_{g_idx}_{m_idx}"
+                        is_done = btn_key in st.session_state.get('recorded_ids', set())
+                        if st.button("기록 저장", key=btn_key, disabled=is_done, use_container_width=True):
+                            if match['t1'] != "미지정" and match['t2'] != "미지정":
+                                add_match_record(match['t1'], match['t2'], s1, s2)
+                                if 'recorded_ids' not in st.session_state: st.session_state.recorded_ids = set()
+                                st.session_state.recorded_ids.add(btn_key)
+                                st.toast(f"Game {g_idx+1} 기록 완료!")
+                                st.rerun()
+                            else:
+                                st.error("선수를 먼저 선택해주세요.")
 
 # [3] 랭킹 & 분석
 elif menu == "📊 랭킹 & 분석":
