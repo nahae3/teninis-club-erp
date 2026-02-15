@@ -1074,7 +1074,7 @@ elif menu == "🏟️ 경기 운영":
 
 
 # 2.5 회장맘대로 (신규 기능)
-with mode_tab5:
+    with mode_tab5:
     st.subheader("👑 회장님 전용 맞춤 매칭")
     
     # [1] 복구 및 기본 설정
