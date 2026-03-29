@@ -633,15 +633,46 @@ elif menu == "🏟️ 경기 운영":
                 if saved_schedule:
                     st.session_state.schedule = saved_schedule
                     st.session_state.is_generated = True
-                    st.session_state.recorded_ids = set() 
-                    # 이미 기록된 ID들을 DB에서 확인해서 recorded_ids 복구 (선택 사항, 여기선 간단히 처리)
-                    # 실제로는 DB를 조회해서 이미 완료된 경기는 버튼을 비활성화 해야 완벽함
-                    hist = load_data("경기기록", ["경기ID"])
+
+                    # [수정] 3번 요청: 오늘 날짜의 경기 기록을 불러와서 완료 처리 및 점수 동기화
+                    hist = load_data("경기기록", ["날짜", "팀1", "팀2", "점수1", "점수2"])
+                    today_str = datetime.now().strftime("%Y-%m-%d")
+                    recorded_matches = {}
+
                     if not hist.empty:
-                         # 저장할 때 ID생성 로직이 없어서 단순 매칭으론 복구 어려움. 
-                         # 따라서 불러오기만 하고 중복 입력 주의 문구 띄움
-                         st.toast("대진표를 복구했습니다! 이미 입력한 경기는 다시 입력하지 마세요.")
-                    st.success("대진표 복구 완료!")
+                        for _, row in hist.iterrows():
+                            if today_str in str(row['날짜']):
+                                t1, t2 = str(row['팀1']).strip(), str(row['팀2']).strip()
+                                try:
+                                    s1, s2 = int(row['점수1']), int(row['점수2'])
+                                except:
+                                    s1, s2 = 0, 0
+                                recorded_matches[f"{t1} vs {t2}"] = (s1, s2)
+
+                    recovered_ids = set()
+                    for round_data in saved_schedule:
+                        # [수정] 2번 요청: KeyError 방지 (다른 모드 백업 혼용 시 안전하게 처리)
+                        r_num = round_data.get('round_num', round_data.get('round', round_data.get('game', 1)))
+                        for idx, m in enumerate(round_data['matches']):
+                            m_t1, m_t2 = str(m['t1']).strip(), str(m['t2']).strip()
+                            match_key1 = f"{m_t1} vs {m_t2}"
+                            match_key2 = f"{m_t2} vs {m_t1}"
+
+                            # 팀1 vs 팀2 기록이 존재하는 경우
+                            if match_key1 in recorded_matches:
+                                s1, s2 = recorded_matches[match_key1]
+                                recovered_ids.add(f"btn_r{r_num}m{idx}")
+                                st.session_state[f"r{r_num}m{idx}s1"] = s1
+                                st.session_state[f"r{r_num}m{idx}s2"] = s2
+                            # 팀2 vs 팀1 로 순서가 바뀌어 저장된 경우
+                            elif match_key2 in recorded_matches:
+                                s2, s1 = recorded_matches[match_key2]
+                                recovered_ids.add(f"btn_r{r_num}m{idx}")
+                                st.session_state[f"r{r_num}m{idx}s1"] = s1
+                                st.session_state[f"r{r_num}m{idx}s2"] = s2
+
+                    st.session_state.recorded_ids = recovered_ids
+                    st.success(f"대진표 복구 완료! (완료된 경기 {len(recovered_ids)}건 동기화)")
                 else:
                     st.error("저장된 대진표가 없습니다.")
             
@@ -675,11 +706,12 @@ elif menu == "🏟️ 경기 운영":
                         display_data = []
                         for rd in st.session_state.schedule:
                             for idx, m in enumerate(rd['matches']):
-                                display_data.append({"round": f"Round {rd['round_num']}", "court": f"{idx+1}코트", "t1": m['t1'], "t2": m['t2']})
+                                display_data.append({"round": f"Round {rd.get('round_num', rd.get('round', rd.get('game', 1)))}", "court": f"{idx+1}코트", "t1": m['t1'], "t2": m['t2']})
                         share_to_live_board(display_data)
 
                 for round_data in st.session_state.schedule:
-                    r_num = round_data['round_num']
+                    # [수정] 2번 요청: KeyError 방지를 위해 .get() 사용 (일반, KDK, 회장 모드 호환)
+                    r_num = round_data.get('round_num', round_data.get('round', round_data.get('game', 1)))
                     st.markdown(f"**Round {r_num}**")
                     for idx, match in enumerate(round_data['matches']):
                         with st.container(border=True):
