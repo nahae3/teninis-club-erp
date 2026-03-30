@@ -10,7 +10,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 import json
 
 # --- 설정 및 한글 폰트 ---
-st.set_page_config(page_title="Sunday Smashers V7", page_icon="🎾", layout="wide")
+st.set_page_config(page_title="Sunday Smashers V7.5", page_icon="🎾", layout="wide")
 
 # [폰트 설정]
 try:
@@ -443,7 +443,7 @@ def draw_bracket_plot(teams_4):
     return fig
 
 # --- UI 시작 ---
-st.title("🎾 Sunday Smashers V7")
+st.title("🎾 Sunday Smashers V7.5")
 
 # 인증 확인 (관리자 모드 활성화 여부)
 is_admin = check_admin()
@@ -702,6 +702,25 @@ elif menu == "🏟️ 경기 운영":
             if st.session_state.get('is_generated'):
                 st.divider()
                 if is_admin:
+                    # [NEW] 대진표 강제 수정 기능 (관리자 전용)
+                    with st.expander("🛠️ 대진표 팀/선수 수정 (결원/부상 발생 시)"):
+                        st.caption("⚠️ 이미 결과가 기록된 경기를 수정할 경우, '경기 기록 관리' 탭에서 기존 기록을 삭제 후 다시 입력해야 합니다.")
+                        edit_r_idx = st.selectbox("라운드 선택", range(len(st.session_state.schedule)), format_func=lambda x: f"Round {st.session_state.schedule[x].get('round_num', st.session_state.schedule[x].get('round', st.session_state.schedule[x].get('game', x+1)))}", key="gen_edit_r")
+                        if st.session_state.schedule:
+                            matches = st.session_state.schedule[edit_r_idx]['matches']
+                            edit_m_idx = st.selectbox("경기 선택", range(len(matches)), format_func=lambda x: f"{x+1}코트: {matches[x]['t1']} vs {matches[x]['t2']}", key="gen_edit_m")
+                            
+                            c_edit1, c_edit2 = st.columns(2)
+                            new_t1 = c_edit1.text_input("팀1 (선수 이름, 쉼표로 구분)", value=matches[edit_m_idx]['t1'], key="gen_edit_t1")
+                            new_t2 = c_edit2.text_input("팀2 (선수 이름, 쉼표로 구분)", value=matches[edit_m_idx]['t2'], key="gen_edit_t2")
+                            
+                            if st.button("🔄 팀 수정 적용", key="gen_edit_btn"):
+                                st.session_state.schedule[edit_r_idx]['matches'][edit_m_idx]['t1'] = new_t1
+                                st.session_state.schedule[edit_r_idx]['matches'][edit_m_idx]['t2'] = new_t2
+                                save_schedule_backup(st.session_state.schedule)
+                                st.success("수정 완료! (실시간 중계판에도 반영하려면 '실시간 중계하기' 버튼을 다시 눌러주세요)")
+                                st.rerun()
+
                     if st.button("📢 실시간 중계하기 (일반)", use_container_width=True):
                         display_data = []
                         for rd in st.session_state.schedule:
@@ -1069,6 +1088,24 @@ elif menu == "🏟️ 경기 운영":
             # [중요 변경점] KDK 출력 로직을 탭 내부로 이동
             if st.session_state.get('kdk_active'):
                 if is_admin:
+                    # [NEW] KDK 대진표 강제 수정 기능
+                    with st.expander("🛠️ 대진표 선수 수정 (결원/부상 발생 시)"):
+                        st.caption("⚠️ 이미 결과가 기록된 경기를 수정할 경우, '경기 기록 관리' 탭에서 기존 기록을 삭제 후 다시 입력해야 합니다.")
+                        if st.session_state.kdk_schedule:
+                            edit_r_idx = st.selectbox("라운드 선택", range(len(st.session_state.kdk_schedule)), format_func=lambda x: f"Round {st.session_state.kdk_schedule[x]['round']}", key="kdk_edit_r")
+                            matches = st.session_state.kdk_schedule[edit_r_idx]['matches']
+                            edit_m_idx = st.selectbox("경기 선택", range(len(matches)), format_func=lambda x: f"{x+1}코트: {matches[x]['t1']} vs {matches[x]['t2']}", key="kdk_edit_m")
+                            
+                            c_edit1, c_edit2 = st.columns(2)
+                            new_t1 = c_edit1.text_input("팀1 (선수 이름, 쉼표로 구분)", value=matches[edit_m_idx]['t1'], key="kdk_edit_t1")
+                            new_t2 = c_edit2.text_input("팀2 (선수 이름, 쉼표로 구분)", value=matches[edit_m_idx]['t2'], key="kdk_edit_t2")
+                            
+                            if st.button("🔄 선수 수정 적용", key="kdk_edit_btn"):
+                                st.session_state.kdk_schedule[edit_r_idx]['matches'][edit_m_idx]['t1'] = new_t1
+                                st.session_state.kdk_schedule[edit_r_idx]['matches'][edit_m_idx]['t2'] = new_t2
+                                st.success("수정 완료! (실시간 중계판에도 반영하려면 '실시간 중계하기' 버튼을 다시 눌러주세요)")
+                                st.rerun()
+
                     if st.button("📢 실시간 중계하기 (KDK)", use_container_width=True):
                         display_data = []
                         for r in st.session_state.kdk_schedule:
@@ -1194,6 +1231,25 @@ elif menu == "🏟️ 경기 운영":
         if st.session_state.get('boss_active'):
             st.divider()
             if is_admin:
+                # [NEW] 회장맘대로 대진표 강제 수정 기능
+                with st.expander("🛠️ 대진표 선수 수정 (결원/부상 발생 시)"):
+                    st.caption("⚠️ 이미 결과가 기록된 경기를 수정할 경우, '경기 기록 관리' 탭에서 기존 기록을 삭제 후 다시 입력해야 합니다.")
+                    if st.session_state.boss_schedule:
+                        edit_r_idx = st.selectbox("게임 선택", range(len(st.session_state.boss_schedule)), format_func=lambda x: f"Game {st.session_state.boss_schedule[x].get('game', st.session_state.boss_schedule[x].get('game_num', x+1))}", key="boss_edit_r")
+                        matches = st.session_state.boss_schedule[edit_r_idx]['matches']
+                        edit_m_idx = st.selectbox("경기 선택", range(len(matches)), format_func=lambda x: f"{matches[x].get('court', f'{x+1}코트')}: {matches[x]['t1']} vs {matches[x]['t2']}", key="boss_edit_m")
+                        
+                        c_edit1, c_edit2 = st.columns(2)
+                        new_t1 = c_edit1.text_input("팀1 (선수 이름, 쉼표로 구분)", value=matches[edit_m_idx]['t1'], key="boss_edit_t1")
+                        new_t2 = c_edit2.text_input("팀2 (선수 이름, 쉼표로 구분)", value=matches[edit_m_idx]['t2'], key="boss_edit_t2")
+                        
+                        if st.button("🔄 선수 수정 적용", key="boss_edit_btn"):
+                            st.session_state.boss_schedule[edit_r_idx]['matches'][edit_m_idx]['t1'] = new_t1
+                            st.session_state.boss_schedule[edit_r_idx]['matches'][edit_m_idx]['t2'] = new_t2
+                            save_schedule_backup(st.session_state.boss_schedule)
+                            st.success("수정 완료! (실시간 현황판에도 반영하려면 '실시간 현황판 전송' 버튼을 다시 눌러주세요)")
+                            st.rerun()
+
                 if st.button("📢 실시간 현황판 전송 (회장맘대로)", use_container_width=True):
                     live_data = []
                     for gs in st.session_state.boss_schedule:
